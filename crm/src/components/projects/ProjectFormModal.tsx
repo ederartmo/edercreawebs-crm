@@ -81,6 +81,13 @@ function toMoney(v: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function formatClientLabel(client: Pick<Client, "name" | "company">): string {
+  if (client.company && client.name) {
+    return `${client.company} — ${client.name}`;
+  }
+  return client.company || client.name;
+}
+
 function normalizeProjectForSave(form: ProjectFormState): ProjectInsert {
   return {
     client_id: form.client_id,
@@ -115,6 +122,15 @@ export function ProjectFormModal({
   const [form, setForm] = useState<ProjectFormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const selectedClient = clients.find((client) => client.id === form.client_id);
+  const projectClientFallback = project?.clients
+    ? formatClientLabel(project.clients)
+    : null;
+  const selectedClientLabel =
+    (selectedClient ? formatClientLabel(selectedClient) : null) ||
+    projectClientFallback ||
+    "Selecciona un cliente";
 
   useEffect(() => {
     if (project) {
@@ -192,13 +208,14 @@ export function ProjectFormModal({
                 onValueChange={(v) => set("client_id", v ?? "")}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Selecciona cliente" />
+                  <SelectValue>
+                    <span className="truncate">{selectedClientLabel}</span>
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {clients.map((client) => (
                     <SelectItem key={client.id} value={client.id}>
-                      {client.name}
-                      {client.company ? ` - ${client.company}` : ""}
+                      {formatClientLabel(client)}
                     </SelectItem>
                   ))}
                 </SelectContent>

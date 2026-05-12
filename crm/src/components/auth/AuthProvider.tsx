@@ -17,6 +17,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
 
   useEffect(() => {
+    // Si no hay cliente (faltan variables de entorno), terminar loading sin sesión
+    if (!supabase) {
+      setSession({ user: null, loading: false, error: null });
+      return;
+    }
+
     // Obtener sesión inicial
     supabase.auth
       .getSession()

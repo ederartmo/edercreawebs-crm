@@ -6,8 +6,11 @@ import type {
   ProjectWithClient,
   ProjectTask,
   ProjectNote,
+  ProjectNoteInsert,
   Payment,
+  PaymentInsert,
   ProjectLink,
+  ProjectLinkInsert,
   ProjectTaskUpdate,
   PaymentUpdate,
 } from "@/types";
@@ -142,7 +145,7 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function handleAddNote(noteInsert: { project_id: string; note: string }) {
+  async function handleAddNote(noteInsert: ProjectNoteInsert) {
     if (!supabase) return;
 
     const { data, error } = await supabase
@@ -151,9 +154,9 @@ export default function ProjectDetailPage() {
       .select("*")
       .single();
 
-    if (!error) {
-      setNotes((prev) => [data as ProjectNote, ...prev]);
-    }
+    if (error) throw new Error(`No se pudo guardar la nota: ${error.message}`);
+
+    setNotes((prev) => [data as ProjectNote, ...prev]);
   }
 
   async function handleDeleteNote(noteId: string) {
@@ -161,12 +164,12 @@ export default function ProjectDetailPage() {
 
     const { error } = await supabase.from("project_notes").delete().eq("id", noteId);
 
-    if (!error) {
-      setNotes((prev) => prev.filter((n) => n.id !== noteId));
-    }
+    if (error) throw new Error(`No se pudo eliminar la nota: ${error.message}`);
+
+    setNotes((prev) => prev.filter((n) => n.id !== noteId));
   }
 
-  async function handleAddPayment(paymentInsert: any) {
+  async function handleAddPayment(paymentInsert: PaymentInsert) {
     if (!supabase) return;
 
     const { data, error } = await supabase
@@ -207,7 +210,7 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function handleAddLink(linkInsert: any) {
+  async function handleAddLink(linkInsert: ProjectLinkInsert) {
     if (!supabase) return;
 
     const { data, error } = await supabase
@@ -409,6 +412,7 @@ export default function ProjectDetailPage() {
         <div className="rounded-lg border border-gray-200 bg-white p-4">
           <ProjectNotesSection
             notes={notes}
+            projectId={projectId}
             onAddNote={handleAddNote}
             onDeleteNote={handleDeleteNote}
             loading={loading}

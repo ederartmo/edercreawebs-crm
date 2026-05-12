@@ -8,6 +8,7 @@ import { Trash2, Plus } from "lucide-react";
 
 interface ProjectNotesSectionProps {
   notes: ProjectNote[];
+  projectId: string;
   onAddNote: (note: ProjectNoteInsert) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
   loading?: boolean;
@@ -15,6 +16,7 @@ interface ProjectNotesSectionProps {
 
 export function ProjectNotesSection({
   notes,
+  projectId,
   onAddNote,
   onDeleteNote,
   loading,
@@ -23,15 +25,19 @@ export function ProjectNotesSection({
   const [noteText, setNoteText] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleAddNote() {
     if (!noteText.trim()) return;
 
     setSaving(true);
+    setError(null);
     try {
-      await onAddNote({ project_id: notes[0]?.project_id || "", note: noteText.trim() });
+      await onAddNote({ project_id: projectId, note: noteText.trim() });
       setNoteText("");
       setFormOpen(false);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar la nota.");
     } finally {
       setSaving(false);
     }
@@ -41,8 +47,11 @@ export function ProjectNotesSection({
     if (!confirm("¿Eliminar esta nota?")) return;
 
     setDeletingId(noteId);
+    setError(null);
     try {
       await onDeleteNote(noteId);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "No se pudo eliminar la nota.");
     } finally {
       setDeletingId(null);
     }
@@ -102,6 +111,10 @@ export function ProjectNotesSection({
             </Button>
           </div>
         </div>
+      )}
+
+      {error && (
+        <p className="text-sm text-red-600">{error}</p>
       )}
 
       {notes.length === 0 ? (

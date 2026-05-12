@@ -1,19 +1,17 @@
 import { createBrowserClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-export function createClient() {
+export function createClient(): SupabaseClient | null {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-  // Durante build, si faltan vars de entorno, retorna stub
   if (!supabaseUrl || !supabaseKey) {
-    if (typeof window === "undefined") {
-      // SSR: retorna null durante build
-      return null as any;
+    if (typeof window !== "undefined") {
+      console.warn(
+        "Supabase credentials not found. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in crm/.env.local and restart the dev server."
+      );
     }
-    console.warn(
-      "Supabase credentials not found. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
-    );
-    return null as any;
+    return null;
   }
 
   return createBrowserClient(supabaseUrl, supabaseKey);

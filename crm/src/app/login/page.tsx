@@ -36,6 +36,15 @@ export default function LoginPage() {
     setError(null);
 
     const supabase = createClient();
+
+    if (!supabase) {
+      setError(
+        "Supabase no está configurado. Revisa crm/.env.local y reinicia el servidor."
+      );
+      setLoading(false);
+      return;
+    }
+
     const { error: authError } = await supabase.auth.signInWithPassword({
       email,
       password,

@@ -72,6 +72,26 @@ export type MaintenanceStatus =
   | "pending_payment"
   | "cancelled";
 
+// Lead
+export interface Lead {
+  id: string;
+  name: string;
+  company: string | null;
+  phone: string | null;
+  email: string | null;
+  source: LeadSource;
+  business_type: string | null;
+  need_summary: string | null;
+  status: CrmStatus;
+  notes: string | null;
+  contacted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type LeadInsert = Omit<Lead, "id" | "created_at" | "updated_at">;
+export type LeadUpdate = Partial<LeadInsert>;
+
 // Usuario autenticado
 export interface AuthUser {
   id: string;

@@ -8,14 +8,61 @@
 - Kanban simple para estado de leads y proyectos
 - Cards resumidas en dashboard
 
+## Layout base
+
+El CRM debe usar un layout con sidebar fija y contenido principal.
+
+### Sidebar
+
+Elementos:
+
+- Dashboard
+- Leads
+- Clientes
+- Proyectos
+- Pagos
+
+### Topbar
+
+Elementos:
+
+- Título de la pantalla actual
+- Búsqueda rápida opcional
+- Botón principal de acción según la pantalla
+- Usuario actual / cerrar sesión
+
+### Contenido principal
+
+Debe usar cards, tablas y formularios simples.
+El diseño debe priorizar claridad, velocidad y lectura rápida.
+
+## Estilo visual recomendado
+
+- Fondo general gris muy claro
+- Cards blancas con borde suave
+- Sidebar oscura o blanca con navegación clara
+- Badges de estado con colores diferenciados
+- Botones principales en color azul o negro
+- Tipografía limpia, moderna y legible
+- Espaciado amplio
+- Nada de animaciones innecesarias
+- Priorizar velocidad y claridad
+
+Regla:
+
+- No usar diseños demasiado decorativos. El CRM es una herramienta operativa.
+
 ## Rutas base
 
 ```text
 /login
 /dashboard
 /leads
+/leads/[id]
 /clientes
+/clientes/[id]
 /proyectos
+/proyectos/nuevo
 /proyectos/[id]
 /pagos
 ```
@@ -94,6 +141,24 @@ Tarjeta de lead:
 - Fuente
 - Próxima acción
 
+## /leads/[id]
+
+Objetivo: ver el detalle del lead antes de convertirlo.
+
+Bloques:
+
+- Datos del lead
+- Qué vende
+- Qué necesita
+- Fuente
+- Estado
+- Notas
+- Próxima acción
+
+Acción principal:
+
+- Convertir a cliente
+
 ## /clientes
 
 Objetivo: consultar clientes confirmados.
@@ -109,12 +174,19 @@ Vista tabla:
 - Proyectos activos
 - Acciones
 
-Ficha sugerida:
+## /clientes/[id]
+
+Objetivo: ver la ficha del cliente.
+
+Bloques:
 
 - Datos generales
+- Contacto
+- RFC / ubicación
 - Redes sociales
 - Notas
-- Lista de proyectos relacionados
+- Proyectos relacionados
+- Pagos relacionados
 
 ## /proyectos
 
@@ -154,6 +226,28 @@ Tarjeta Kanban:
 - Próxima acción
 - Fecha estimada
 
+## /proyectos/nuevo
+
+Objetivo: crear un nuevo proyecto asociado a un cliente existente o a un lead convertido.
+
+Elementos:
+
+- Cliente
+- Lead relacionado opcional
+- Nombre del proyecto
+- Tipo de proyecto
+- Estado inicial
+- Precio total
+- Anticipo
+- Segundo pago
+- Fecha estimada
+- Próxima acción
+- Notas internas
+
+Regla:
+
+- Al crear proyecto, debe generarse automáticamente el checklist base.
+
 ## /proyectos/[id]
 
 Objetivo: concentrar toda la operación del proyecto.
@@ -187,6 +281,17 @@ Bloques:
 7. Links importantes
    - Lista editable por tipo
 
+Acciones disponibles:
+
+- Editar proyecto
+- Cambiar estado
+- Marcar anticipo como pagado
+- Marcar segundo pago como pagado
+- Agregar nota
+- Agregar link
+- Agregar pago
+- Marcar tarea como completada
+
 ## /pagos
 
 Objetivo: controlar cobros pendientes y pagados.
@@ -210,6 +315,121 @@ Filtros:
 - Vencido
 - Cancelado
 
+## Badges de estado
+
+Cada estado debe mostrarse como badge visual.
+
+Ejemplos:
+
+- Lead nuevo
+- Diagnóstico
+- Cotización enviada
+- Esperando anticipo
+- Información pendiente
+- Diseño
+- Desarrollo
+- Revisión cliente
+- Segundo pago pendiente
+- Publicado
+- Entregado
+- Mantenimiento
+- Perdido
+
+Regla:
+
+- Los badges deben usar colores consistentes en todo el CRM.
+
+## Estados vacíos
+
+### Leads vacío
+
+Texto:
+
+- "No tienes leads registrados todavía."
+
+Botón:
+
+- "Crear primer lead"
+
+### Clientes vacío
+
+Texto:
+
+- "No tienes clientes registrados todavía."
+
+Botón:
+
+- "Crear cliente"
+
+### Proyectos vacío
+
+Texto:
+
+- "No tienes proyectos activos todavía."
+
+Botón:
+
+- "Crear proyecto"
+
+### Pagos vacío
+
+Texto:
+
+- "No hay pagos registrados todavía."
+
+## Formularios mínimos
+
+### Formulario de lead
+
+Campos:
+
+- Nombre
+- Empresa
+- WhatsApp
+- Correo
+- Fuente
+- Qué vende
+- Qué necesita
+- Estado
+- Próxima acción
+- Notas
+
+### Formulario de cliente
+
+Campos:
+
+- Nombre
+- Empresa
+- Correo
+- WhatsApp
+- Teléfono
+- RFC
+- Ubicación
+- Sitio actual
+- Redes sociales
+- Notas
+
+### Formulario de proyecto
+
+Campos:
+
+- Cliente
+- Lead relacionado opcional
+- Nombre del proyecto
+- Tipo de proyecto
+- Estado
+- Precio total
+- Anticipo
+- Segundo pago
+- Fecha inicio
+- Fecha estimada
+- Próxima acción
+- Link Drive
+- Link cotización
+- Link sitio prueba
+- Link sitio final
+- Notas
+
 ## Componentes sugeridos
 
 - Sidebar principal
@@ -222,21 +442,3 @@ Filtros:
 - Checklist item
 - Timeline de notas
 - Lista de links importantes
-
-## Estados visibles sugeridos
-
-- Lead nuevo
-- Diagnóstico
-- Cotización enviada
-- Esperando anticipo
-- Información pendiente
-- Diseño
-- Diseño enviado
-- Ajustes de diseño
-- Desarrollo
-- Revisión cliente
-- Segundo pago pendiente
-- Publicado
-- Entregado
-- Mantenimiento
-- Perdido

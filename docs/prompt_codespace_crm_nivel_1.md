@@ -1,171 +1,144 @@
 # Prompt para Codespace Agent — CRM Interno EderCreaWebs Nivel 1
 
-Construye un CRM interno para EderCreaWebs enfocado en operación interna, no en experiencia de cliente.
+Usa los documentos dentro de `/docs` como fuente de verdad para el CRM Interno EderCreaWebs Nivel 1.
 
-## Objetivo
+## Contexto
 
-Permitir que el negocio pueda crear leads, convertirlos en clientes, crear proyectos y saber siempre:
+El CRM es una herramienta interna para organizar leads, clientes, proyectos, checklist, pagos, links y próximas acciones.
 
-- en qué estado está cada proyecto,
-- qué falta,
-- cuánto ha pagado,
-- y cuál es la próxima acción.
+No se debe construir como un SaaS completo ni como portal para clientes.
 
-## Stack obligatorio
-
-- Next.js
-- Supabase
-- Tailwind CSS
-- shadcn/ui
-
-## Pantallas a crear
+## Rutas previstas
 
 ```text
 /login
 /dashboard
 /leads
+/leads/[id]
 /clientes
+/clientes/[id]
 /proyectos
+/proyectos/nuevo
 /proyectos/[id]
 /pagos
 ```
 
-## Tablas a usar
+## Reglas de negocio clave
 
-- profiles
-- leads
-- clients
-- projects
-- project_tasks
-- project_notes
-- payments
-- project_links
+- No permitir avanzar a diseño o desarrollo si el anticipo no está confirmado.
+- No permitir entrega o publicación final si el segundo pago no está confirmado, salvo excepción futura.
+- Todo proyecto debe crearse con checklist base.
+- Todo proyecto debe tener `next_action`.
+- El dominio debe poder quedar como `pendiente`, `confirmado`, `comprado` o `conectado`.
+- La UI de mantenimiento no es prioridad en la primera fase técnica aunque el schema pueda contemplarla.
 
-## Funcionalidad mínima obligatoria
+## Restricciones globales
 
-1. Login interno.
-2. CRUD de leads.
-3. Cambio de estado de lead.
-4. Conversión de lead a cliente.
-5. CRUD de clientes.
-6. CRUD de proyectos.
-7. Generación automática del checklist base al crear un proyecto.
-8. Visualización y actualización del checklist del proyecto.
-9. Registro de notas internas por proyecto.
-10. Registro de pagos manuales.
-11. Registro de links importantes.
-12. Campo y visibilidad de próxima acción en proyectos.
-13. Dashboard con métricas operativas y próximas acciones.
-14. Vista tipo Kanban simple para proyectos.
+- No construyas todo el CRM en una sola tarea.
+- No inventes funcionalidades fuera del Nivel 1.
+- No crees portal de cliente.
+- No agregues automatizaciones.
+- No integres WhatsApp, Gmail, Drive ni Calendar.
+- Mantén el código limpio, simple y escalable.
 
-## Estados internos del sistema
+## Forma de trabajo obligatoria
 
-```text
-lead_nuevo
-diagnostico
-cotizacion_enviada
-esperando_anticipo
-info_pendiente
-diseno
-diseno_enviado
-ajustes_diseno
-desarrollo
-revision_cliente
-segundo_pago_pendiente
-publicado
-entregado
-mantenimiento
-perdido
-```
+No construyas todo el CRM en una sola tarea.
 
-## Reglas de negocio obligatorias
+Trabaja por fases pequeñas, verificables y acumulativas.
 
-1. No permitir avanzar a diseño o desarrollo si el anticipo no está confirmado.
-2. No permitir entrega o publicación final si el segundo pago no está confirmado, salvo excepción explícita futura.
-3. Todo proyecto debe crearse con checklist base.
-4. Todo proyecto debe tener `next_action`.
-5. Debe poder registrarse el estado del dominio como confirmado, comprado o pendiente.
-6. Al entregar un proyecto debe quedar contemplada la tarea de ofrecer mantenimiento.
+Antes de modificar código:
 
-## Checklist base obligatorio
+1. Revisa los documentos dentro de `/docs`.
+2. Resume el alcance de la fase actual.
+3. Identifica archivos que vas a crear o modificar.
+4. Implementa solo la fase solicitada.
+5. Ejecuta lint/build si aplica.
+6. Resume qué cambió y qué falta.
+
+No avances a la siguiente fase sin que la fase actual esté estable.
+
+## Prompt inmediato para Fase 1 técnica
 
 ```text
-Responder lead
-Identificar qué vende
-Identificar qué espera
-Identificar herramienta necesaria
-Pedir referencias
-Crear carpeta Drive
-Crear documento de info base
-Pedir fotos/videos/contenido
-Preparar cotización
-Enviar propuesta
-Solicitar anticipo 50%
-Confirmar anticipo
-Confirmar dominio
-Comprar dominio
-Contratar hosting
-Definir fechas
-Analizar conversación y referencias
-Generar resumen estratégico
-Crear propuesta de diseño
-Enviar diseño
-Aprobar diseño
-Desarrollar sitio/sistema
-Probar responsive
-Probar formularios
-Enviar versión de revisión
-Aplicar ajustes
-Solicitar segundo pago
-Confirmar segundo pago
-Publicar
-Entregar accesos
-Ofrecer mantenimiento
-Cerrar proyecto
-```
+Usa los documentos dentro de /docs como fuente de verdad para el CRM Interno EderCreaWebs Nivel 1.
 
-## Estilo visual
+No construyas todo el CRM todavía.
 
+Implementa únicamente la Fase 1 técnica.
+
+Objetivo de esta fase:
+- Configurar la base del proyecto Next.js.
+- Configurar Tailwind CSS.
+- Configurar shadcn/ui.
+- Configurar Supabase client.
+- Crear archivo .env.example con variables necesarias.
+- Crear layout base con sidebar + header.
+- Crear página /login visualmente funcional.
+- Crear página /dashboard placeholder.
+- Crear navegación base para:
+  - Dashboard
+  - Leads
+  - Clientes
+  - Proyectos
+  - Pagos
+
+Restricciones:
+- No implementes CRUD todavía.
+- No implementes auth completa si requiere credenciales reales; deja la estructura lista para Supabase Auth.
+- No crees portal de cliente.
+- No agregues automatizaciones.
+- No integres WhatsApp, Gmail, Drive ni Calendar.
+- No inventes funcionalidades fuera del Nivel 1.
+
+Estilo:
 - Limpio
 - Profesional
-- Rápido de usar
-- Enfoque administrativo
+- Administrativo
 - Sidebar + header
-- Tarjetas para métricas
-- Tablas para gestión
-- Kanban simple y claro
+- Cards blancas
+- Fondo gris claro
+- Badges preparados para estados
+- Componentes reutilizables cuando tenga sentido
 
-## Qué sí debes entregar en el MVP
+Al terminar:
+1. Ejecuta lint/build si aplica.
+2. Resume archivos creados o modificados.
+3. Indica cómo correr el proyecto.
+4. Indica el siguiente paso recomendado.
+```
 
-- Flujo completo desde lead hasta proyecto en seguimiento
-- Dashboard útil con pendientes reales
-- Gestión operativa diaria
-- Base preparada para crecer a portal de cliente en futuro
+## Prompt recomendado para Fase 2 técnica
 
-## Qué no debes inventar
+```text
+Implementa la Fase 2 técnica del CRM Nivel 1.
 
-- Portal para clientes
-- Automatizaciones con WhatsApp
-- Integraciones completas con Gmail, Calendar o Drive
-- Pagos reales integrados
-- Facturación
-- Roles avanzados
-- Comentarios del cliente
-- Subida de archivos
+Objetivo:
+- Aplicar o preparar el schema de Supabase usando docs/supabase_schema_crm_nivel_1.sql.
+- Crear tipos TypeScript para los enums principales.
+- Crear helpers para estados visibles.
+- Crear configuración de Supabase Auth.
+- Proteger rutas internas para que /dashboard, /leads, /clientes, /proyectos y /pagos requieran sesión.
+- Mantener /login pública.
 
-## Criterio de éxito
+Restricciones:
+- No implementes todavía CRUD completo.
+- No agregues funcionalidades fuera del Nivel 1.
+- No crees portal de cliente.
 
-El MVP queda listo cuando un usuario interno puede:
+Al terminar:
+1. Ejecuta lint/build si aplica.
+2. Resume cambios.
+3. Indica próximos pasos.
+```
 
-1. iniciar sesión,
-2. crear un lead,
-3. cambiar su estado,
-4. convertirlo en cliente,
-5. crear un proyecto,
-6. ver el proyecto en dashboard,
-7. ver el proyecto en kanban,
-8. marcar tareas del checklist,
-9. registrar pagos,
-10. guardar links,
-11. agregar notas,
-12. y consultar la próxima acción.
+## Orden ideal de prompts
+
+1. Fase 1: Base técnica + layout + login visual + dashboard placeholder
+2. Fase 2: Supabase Auth + protección de rutas + types/helpers
+3. Fase 3: CRUD leads
+4. Fase 4: CRUD clientes + convertir lead a cliente
+5. Fase 5: CRUD proyectos + checklist automático
+6. Fase 6: Detalle de proyecto: checklist, notas, links, pagos
+7. Fase 7: Dashboard real + Kanban
+8. Fase 8: Pulido, pruebas, seed data y deploy

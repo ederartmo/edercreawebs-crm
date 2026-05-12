@@ -84,8 +84,11 @@ El MVP debe permitir:
 /login
 /dashboard
 /leads
+/leads/[id]
 /clientes
+/clientes/[id]
 /proyectos
+/proyectos/nuevo
 /proyectos/[id]
 /pagos
 ```
@@ -178,6 +181,7 @@ Campos:
 - Qué necesita
 - Fuente
 - Estado
+- Próxima acción
 - Notas
 - Fecha de contacto
 
@@ -294,9 +298,23 @@ Todo proyecto debe generarse con este checklist base:
 
 ### Notas internas
 
-Deben permitir guardar contexto operativo del proyecto o cliente.
+Cada proyecto debe permitir guardar notas internas.
+
+Ejemplos:
+
+- Cliente quiere algo parecido a referencia X.
+- Le preocupa el precio.
+- Necesita factura.
+- Quiere pagos en línea.
+- No tiene fotos.
+- Ya tiene dominio.
+- Necesita presentar la propuesta a un socio.
+- Tiene urgencia por publicar.
+- Requiere mantenimiento mensual.
 
 ### Pagos
+
+El sistema debe permitir registrar pagos manuales.
 
 Campos:
 
@@ -316,20 +334,34 @@ Estados:
 - Vencido
 - Cancelado
 
+Conceptos comunes:
+
+- Anticipo 50%
+- Segundo pago 50%
+- Dominio
+- Hosting
+- Mantenimiento mensual
+- Cambio adicional
+- Integración extra
+
 ### Links importantes
 
-Tipos recomendados:
+Cada proyecto debe permitir guardar links relevantes.
 
-- drive
-- quote
-- design
-- test_site
-- final_site
-- repository
-- hosting
-- domain
-- admin_panel
-- other
+Tipos sugeridos:
+
+- Carpeta de Drive
+- Cotización PDF
+- Documento de información base
+- Resumen estratégico
+- Diseño
+- Sitio en prueba
+- Sitio publicado
+- Repositorio
+- Hosting
+- Dominio
+- Panel administrativo
+- Otro
 
 ## Tablas requeridas
 
@@ -345,30 +377,41 @@ Tipos recomendados:
 ## Reglas de negocio
 
 1. Un proyecto puede existir antes del anticipo, pero no debe pasar a `Diseño` ni `Desarrollo` sin confirmar el primer pago.
-2. El sistema debe registrar si el dominio está confirmado, comprado o pendiente.
-3. Las fechas se definen solo después de revisar alcance, contenido, integraciones, dominio, hosting y pagos.
-4. Todo proyecto debe tener checklist automático.
-5. Todo proyecto debe tener `next_action`.
-6. No se debe entregar o publicar definitivamente sin segundo pago, salvo acuerdo especial.
-7. Al entregar un proyecto debe existir una tarea para ofrecer mantenimiento.
+2. El sistema debe registrar si el dominio está `pendiente`, `confirmado`, `comprado` o `conectado`.
+3. Todo proyecto debe tener checklist automático al crearse.
+4. Todo proyecto debe tener `next_action`.
+5. No se debe entregar o publicar definitivamente sin segundo pago, salvo acuerdo especial.
+6. Al entregar un proyecto debe existir una tarea para ofrecer mantenimiento.
+
+Ejemplos de `next_action`:
+
+- Pedir fotos
+- Esperar anticipo
+- Enviar cotización
+- Revisar referencias
+- Comprar dominio
+- Mandar versión de prueba
+- Solicitar segundo pago
 
 ## Criterios de terminado del Nivel 1
 
 El Nivel 1 se considera útil cuando permite:
 
-1. Entrar con usuario.
-2. Registrar un lead.
-3. Cambiar estado del lead.
-4. Convertirlo en cliente.
-5. Crear proyecto.
-6. Ver proyecto en dashboard.
-7. Ver proyecto en Kanban.
-8. Marcar tareas del checklist.
-9. Agregar notas.
-10. Registrar pago pendiente.
-11. Marcar pago como pagado.
-12. Guardar links importantes.
-13. Ver próxima acción.
+```text
+[ ] Iniciar sesión
+[ ] Registrar un lead
+[ ] Cambiar estado del lead
+[ ] Convertir lead en cliente
+[ ] Crear proyecto
+[ ] Ver proyecto en dashboard
+[ ] Ver proyecto en Kanban
+[ ] Marcar tareas del checklist
+[ ] Agregar notas internas
+[ ] Registrar pago pendiente
+[ ] Marcar pago como pagado
+[ ] Guardar links importantes
+[ ] Ver próxima acción
+```
 
 ## Stack recomendado
 
@@ -377,6 +420,99 @@ El Nivel 1 se considera útil cuando permite:
 - Tailwind CSS
 - shadcn/ui
 - Vercel
+
+## Orden de construcción
+
+### Fase 1
+
+- Crear proyecto Next.js
+- Instalar Tailwind
+- Instalar shadcn/ui
+- Configurar Supabase
+- Crear `.env.example`
+- Crear layout base
+- Crear login
+- Crear dashboard placeholder
+
+### Fase 2
+
+- Crear tablas en Supabase
+- Configurar Auth
+- Configurar RLS básico
+- Crear cliente Supabase en la app
+- Crear seed de estados
+
+### Fase 3
+
+- Crear CRUD de leads
+- Crear CRUD de clientes
+- Crear CRUD de proyectos
+
+### Fase 4
+
+- Crear detalle de proyecto
+- Crear checklist automático
+- Crear notas internas
+- Crear pagos manuales
+- Crear links importantes
+
+### Fase 5
+
+- Crear vista Kanban
+- Pulir dashboard
+- Probar flujo completo
+- Subir a Vercel
+- Usarlo con un cliente real
+
+## Prompt exacto para construir la primera fase técnica
+
+```text
+Usa los documentos dentro de /docs como fuente de verdad para el CRM Interno EderCreaWebs Nivel 1.
+
+No construyas todo el CRM todavía.
+
+Implementa únicamente la Fase 1 técnica.
+
+Objetivo de esta fase:
+- Configurar la base del proyecto Next.js.
+- Configurar Tailwind CSS.
+- Configurar shadcn/ui.
+- Configurar Supabase client.
+- Crear archivo .env.example con variables necesarias.
+- Crear layout base con sidebar + header.
+- Crear página /login visualmente funcional.
+- Crear página /dashboard placeholder.
+- Crear navegación base para:
+  - Dashboard
+  - Leads
+  - Clientes
+  - Proyectos
+  - Pagos
+
+Restricciones:
+- No implementes CRUD todavía.
+- No implementes auth completa si requiere credenciales reales; deja la estructura lista para Supabase Auth.
+- No crees portal de cliente.
+- No agregues automatizaciones.
+- No integres WhatsApp, Gmail, Drive ni Calendar.
+- No inventes funcionalidades fuera del Nivel 1.
+
+Estilo:
+- Limpio
+- Profesional
+- Administrativo
+- Sidebar + header
+- Cards blancas
+- Fondo gris claro
+- Badges preparados para estados
+- Componentes reutilizables cuando tenga sentido
+
+Al terminar:
+1. Ejecuta lint/build si aplica.
+2. Resume archivos creados o modificados.
+3. Indica cómo correr el proyecto.
+4. Indica el siguiente paso recomendado.
+```
 
 ## Frase guía
 

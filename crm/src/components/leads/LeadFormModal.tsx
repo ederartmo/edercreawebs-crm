@@ -51,8 +51,27 @@ function toStr(v: string | null): string {
   return v ?? "";
 }
 
-function toNullable(v: string): string | null {
-  return v.trim() === "" ? null : v.trim();
+function toNullableOnSave(v: string | null): string | null {
+  if (v === null) {
+    return null;
+  }
+
+  const trimmed = v.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function normalizeLeadForSave(form: LeadInsert): LeadInsert {
+  return {
+    ...form,
+    name: form.name.trim(),
+    company: toNullableOnSave(form.company),
+    phone: toNullableOnSave(form.phone),
+    email: toNullableOnSave(form.email),
+    business_type: toNullableOnSave(form.business_type),
+    need_summary: toNullableOnSave(form.need_summary),
+    notes: toNullableOnSave(form.notes),
+    contacted_at: toNullableOnSave(form.contacted_at),
+  };
 }
 
 export function LeadFormModal({
@@ -99,7 +118,7 @@ export function LeadFormModal({
     setSaving(true);
     setError(null);
     try {
-      await onSave(form);
+      await onSave(normalizeLeadForSave(form));
       onClose();
     } catch (err: unknown) {
       setError(
@@ -141,7 +160,7 @@ export function LeadFormModal({
               <Input
                 id="lead-company"
                 value={toStr(form.company)}
-                onChange={(e) => set("company", toNullable(e.target.value))}
+                onChange={(e) => set("company", e.target.value)}
                 placeholder="Empresa S.A."
               />
             </div>
@@ -150,7 +169,7 @@ export function LeadFormModal({
               <Input
                 id="lead-phone"
                 value={toStr(form.phone)}
-                onChange={(e) => set("phone", toNullable(e.target.value))}
+                onChange={(e) => set("phone", e.target.value)}
                 placeholder="+52 55 1234 5678"
               />
             </div>
@@ -163,7 +182,7 @@ export function LeadFormModal({
               id="lead-email"
               type="email"
               value={toStr(form.email)}
-              onChange={(e) => set("email", toNullable(e.target.value))}
+              onChange={(e) => set("email", e.target.value)}
               placeholder="lead@correo.com"
             />
           </div>
@@ -177,7 +196,7 @@ export function LeadFormModal({
                 onValueChange={(v) => set("source", v as LeadSource)}
               >
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue>{LEAD_SOURCE_LABELS[form.source]}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {ALL_LEAD_SOURCES.map((s) => (
@@ -195,7 +214,7 @@ export function LeadFormModal({
                 onValueChange={(v) => set("status", v as CrmStatus)}
               >
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue>{CRM_STATUS_LABELS[form.status]}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {LEAD_STATUSES.map((s) => (
@@ -214,9 +233,7 @@ export function LeadFormModal({
             <Input
               id="lead-business"
               value={toStr(form.business_type)}
-              onChange={(e) =>
-                set("business_type", toNullable(e.target.value))
-              }
+              onChange={(e) => set("business_type", e.target.value)}
               placeholder="Ej: Restaurante, Tienda en línea..."
             />
           </div>
@@ -224,13 +241,13 @@ export function LeadFormModal({
           {/* Qué necesita */}
           <div className="space-y-1.5">
             <Label htmlFor="lead-need">Qué necesita</Label>
-            <Input
+            <Textarea
               id="lead-need"
               value={toStr(form.need_summary)}
-              onChange={(e) =>
-                set("need_summary", toNullable(e.target.value))
-              }
+              onChange={(e) => set("need_summary", e.target.value)}
               placeholder="Ej: Sitio web con formulario de contacto"
+              rows={3}
+              className="resize-none"
             />
           </div>
 
@@ -240,7 +257,7 @@ export function LeadFormModal({
             <Textarea
               id="lead-notes"
               value={toStr(form.notes)}
-              onChange={(e) => set("notes", toNullable(e.target.value))}
+              onChange={(e) => set("notes", e.target.value)}
               placeholder="Notas privadas sobre el lead..."
               rows={3}
               className="resize-none"

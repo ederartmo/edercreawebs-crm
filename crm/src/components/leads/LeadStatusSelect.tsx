@@ -35,7 +35,7 @@ export function LeadStatusSelect({
             CRM_STATUS_COLORS[value]
           )}
         >
-          <SelectValue />
+          <SelectValue>{CRM_STATUS_LABELS[value]}</SelectValue>
         </span>
       </SelectTrigger>
       <SelectContent>

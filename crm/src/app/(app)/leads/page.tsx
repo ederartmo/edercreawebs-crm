@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { Lead, LeadInsert, CrmStatus } from "@/types";
+import type { Lead, LeadInsert, CrmStatus, ClientInsert } from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import {
   LEAD_SOURCE_LABELS,
 } from "@/lib/crm-helpers";
 import { LeadFormModal } from "@/components/leads/LeadFormModal";
+import { ConvertLeadModal } from "@/components/leads/ConvertLeadModal";
 import { LeadStatusSelect } from "@/components/leads/LeadStatusSelect";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Phone, Mail } from "lucide-react";
+import { Plus, Pencil, Trash2, Phone, Mail, UserCheck } from "lucide-react";
 
 export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -19,6 +20,10 @@ export default function LeadsPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<Lead | null>(null);
+
+  const [convertModalOpen, setConvertModalOpen] = useState(false);
+  const [convertingLeadId, setConvertingLeadId] = useState<string | null>(null);
+  const [leadToConvert, setLeadToConvert] = useState<Lead | null>(null);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
@@ -91,6 +96,83 @@ export default function LeadsPage() {
       setLeads((prev) => prev.filter((l) => l.id !== id));
     }
     setDeletingId(null);
+  }
+
+  async function handleConvertToClient() {
+    if (!supabase || !leadToConvert) {
+      throw new Error("Supabase no está configurado.");
+    }
+
+    setConvertingLeadId(leadToConvert.id);
+
+    try {
+      // Verificar si ya existe un cliente con el mismo email
+      if (leadToConvert.email) {
+        const { data: existingByEmail } = await supabase
+          .from("clients")
+          .select("id")
+          .eq("email", leadToConvert.email)
+          .single();
+        if (existingByEmail) {
+          throw new Error(
+            `Ya existe un cliente con el email: ${leadToConvert.email}`
+          );
+        }
+      }
+
+      // Verificar si ya existe un cliente con el mismo teléfono
+      if (leadToConvert.phone) {
+        const { data: existingByPhone } = await supabase
+          .from("clients")
+          .select("id")
+          .eq("phone", leadToConvert.phone)
+          .single();
+        if (existingByPhone) {
+          throw new Error(
+            `Ya existe un cliente con el teléfono: ${leadToConvert.phone}`
+          );
+        }
+      }
+
+      // Crear cliente
+      const clientData: ClientInsert = {
+        name: leadToConvert.name,
+        company: leadToConvert.company,
+        email: leadToConvert.email,
+        phone: leadToConvert.phone,
+        rfc: null,
+        address: null,
+        website: null,
+        notes:
+          leadToConvert.notes || leadToConvert.need_summary
+            ? `${leadToConvert.notes || ""}\n\nRequerimientos iniciales: ${leadToConvert.need_summary || ""}`
+            : "Convertido desde lead",
+      };
+
+      const { data: newClient, error: createError } = await supabase
+        .from("clients")
+        .insert([clientData])
+        .select()
+        .single();
+
+      if (createError) throw new Error(createError.message);
+
+      // Actualizar lead con nota de conversión
+      const convertedNote = `[CONVERTIDO A CLIENTE ${new Date().toLocaleDateString("es-MX")}]\n${leadToConvert.notes || ""}`;
+      const { error: updateError } = await supabase
+        .from("leads")
+        .update({ notes: convertedNote })
+        .eq("id", leadToConvert.id);
+
+      if (updateError) throw new Error(updateError.message);
+
+      // Actualizar estado local
+      await fetchLeads();
+      setConvertModalOpen(false);
+      setLeadToConvert(null);
+    } finally {
+      setConvertingLeadId(null);
+    }
   }
 
   return (
@@ -216,6 +298,19 @@ export default function LeadsPage() {
                           <Button
                             variant="ghost"
                             size="sm"
+                            className="h-7 w-7 p-0 text-gray-500 hover:text-green-600"
+                            title="Convertir a cliente"
+                            onClick={() => {
+                              setLeadToConvert(lead);
+                              setConvertModalOpen(true);
+                            }}
+                            disabled={convertingLeadId === lead.id}
+                          >
+                            <UserCheck className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             className="h-7 w-7 p-0 text-gray-500 hover:text-gray-800"
                             title="Editar lead"
                             onClick={() => {
@@ -254,6 +349,16 @@ export default function LeadsPage() {
         }}
         onSave={editingLead ? handleEdit : handleCreate}
         lead={editingLead}
+      />
+
+      <ConvertLeadModal
+        open={convertModalOpen}
+        onClose={() => {
+          setConvertModalOpen(false);
+          setLeadToConvert(null);
+        }}
+        onConfirm={handleConvertToClient}
+        lead={leadToConvert}
       />
     </div>
   );

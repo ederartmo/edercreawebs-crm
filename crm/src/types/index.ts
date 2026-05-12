@@ -92,6 +92,25 @@ export interface Lead {
 export type LeadInsert = Omit<Lead, "id" | "created_at" | "updated_at">;
 export type LeadUpdate = Partial<LeadInsert>;
 
+// Cliente
+export interface Client {
+  id: string;
+  name: string;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  rfc: string | null;
+  address: string | null;
+  website: string | null;
+  social_links: unknown;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ClientInsert = Omit<Client, "id" | "created_at" | "updated_at" | "social_links">;
+export type ClientUpdate = Partial<ClientInsert>;
+
 // Usuario autenticado
 export interface AuthUser {
   id: string;

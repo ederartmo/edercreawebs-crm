@@ -54,6 +54,8 @@ create type public.link_type as enum (
   'admin_panel',
   'other'
 );
+create type public.maintenance_status as enum ('active', 'paused', 'pending_payment', 'cancelled');
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -116,7 +118,7 @@ create table if not exists public.projects (
   deposit_paid boolean not null default false,
   final_payment_amount numeric(12, 2) not null default 0,
   final_payment_paid boolean not null default false,
-  domain_status text not null default 'pendiente' check (domain_status in ('confirmado', 'comprado', 'pendiente')),
+  domain_status text not null default 'pendiente' check (domain_status in ('pendiente', 'confirmado', 'comprado', 'conectado')),
   drive_url text,
   quote_url text,
   test_url text,
@@ -127,12 +129,14 @@ create table if not exists public.projects (
   notes text,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  -- Para pruebas, marcar deposit_paid = true antes de mover proyectos a diseño o desarrollo.
   constraint projects_status_requires_deposit check (
     not (
       status in ('diseno', 'diseno_enviado', 'ajustes_diseno', 'desarrollo')
       and deposit_paid = false
     )
   ),
+  -- Para pruebas, marcar final_payment_paid = true antes de publicar o entregar.
   constraint projects_delivery_requires_final_payment check (
     not (
       status in ('publicado', 'entregado', 'mantenimiento')
@@ -186,6 +190,22 @@ create table if not exists public.project_links (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
+-- La tabla de mantenimiento puede existir desde el schema, pero la UI no es prioridad en la Fase 1.
+create table if not exists public.maintenance_contracts (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references public.clients (id) on delete cascade,
+  project_id uuid not null references public.projects (id) on delete cascade,
+  plan_name text not null,
+  monthly_amount numeric(12, 2) not null default 0,
+  charge_day smallint,
+  status public.maintenance_status not null default 'active',
+  last_update_at timestamptz,
+  next_action text not null,
+  notes text,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
 create trigger set_profiles_updated_at
 before update on public.profiles
 for each row execute function public.set_updated_at();
@@ -218,6 +238,25 @@ create trigger set_project_links_updated_at
 before update on public.project_links
 for each row execute function public.set_updated_at();
 
+create trigger set_maintenance_contracts_updated_at
+before update on public.maintenance_contracts
+for each row execute function public.set_updated_at();
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and role = 'admin'
+  );
+$$;
+
 alter table public.profiles enable row level security;
 alter table public.leads enable row level security;
 alter table public.clients enable row level security;
@@ -226,67 +265,79 @@ alter table public.project_tasks enable row level security;
 alter table public.project_notes enable row level security;
 alter table public.payments enable row level security;
 alter table public.project_links enable row level security;
+alter table public.maintenance_contracts enable row level security;
 
-create policy "authenticated users can manage profiles"
+-- Nivel 1 asume operación interna. Antes de producción se debe asegurar el alta del primer admin
+-- desde Supabase Auth + service role o desde el dashboard, porque estas policies ya nacen endurecidas.
+create policy "admins can manage profiles"
 on public.profiles
 for all
 to authenticated
-using (true)
-with check (true);
+using (public.is_admin())
+with check (public.is_admin());
 
-create policy "authenticated users can manage leads"
+create policy "admins can manage leads"
 on public.leads
 for all
 to authenticated
-using (true)
-with check (true);
+using (public.is_admin())
+with check (public.is_admin());
 
-create policy "authenticated users can manage clients"
+create policy "admins can manage clients"
 on public.clients
 for all
 to authenticated
-using (true)
-with check (true);
+using (public.is_admin())
+with check (public.is_admin());
 
-create policy "authenticated users can manage projects"
+create policy "admins can manage projects"
 on public.projects
 for all
 to authenticated
-using (true)
-with check (true);
+using (public.is_admin())
+with check (public.is_admin());
 
-create policy "authenticated users can manage project tasks"
+create policy "admins can manage project tasks"
 on public.project_tasks
 for all
 to authenticated
-using (true)
-with check (true);
+using (public.is_admin())
+with check (public.is_admin());
 
-create policy "authenticated users can manage project notes"
+create policy "admins can manage project notes"
 on public.project_notes
 for all
 to authenticated
-using (true)
-with check (true);
+using (public.is_admin())
+with check (public.is_admin());
 
-create policy "authenticated users can manage payments"
+create policy "admins can manage payments"
 on public.payments
 for all
 to authenticated
-using (true)
-with check (true);
+using (public.is_admin())
+with check (public.is_admin());
 
-create policy "authenticated users can manage project links"
+create policy "admins can manage project links"
 on public.project_links
 for all
 to authenticated
-using (true)
-with check (true);
+using (public.is_admin())
+with check (public.is_admin());
+
+create policy "admins can manage maintenance contracts"
+on public.maintenance_contracts
+for all
+to authenticated
+using (public.is_admin())
+with check (public.is_admin());
 
 create or replace function public.seed_project_tasks(p_project_id uuid)
 returns void
 language sql
 as $$
+  -- project_tasks.status ya nace en 'pending', así que el checklist automático queda listo
+  -- para uso inmediato sin necesidad de fijar estado manualmente.
   insert into public.project_tasks (project_id, title, sort_order)
   values
     (p_project_id, 'Responder lead', 10),

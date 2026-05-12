@@ -141,7 +141,7 @@ export type ProjectInsert = Omit<Project, "id" | "created_at" | "updated_at">;
 export type ProjectUpdate = Partial<ProjectInsert>;
 
 export interface ProjectWithClient extends Project {
-  clients: Pick<Client, "id" | "name" | "company"> | null;
+  clients: Pick<Client, "id" | "name" | "company" | "email" | "phone"> | null;
 }
 
 export interface ProjectTask {
@@ -156,6 +156,52 @@ export interface ProjectTask {
   created_at: string;
   updated_at: string;
 }
+
+export type ProjectTaskInsert = Omit<ProjectTask, "id" | "created_at" | "updated_at">;
+export type ProjectTaskUpdate = Partial<ProjectTaskInsert>;
+
+// Nota de proyecto
+export interface ProjectNote {
+  id: string;
+  project_id: string;
+  note: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProjectNoteInsert = Omit<ProjectNote, "id" | "created_at" | "updated_at">;
+
+// Pago de proyecto
+export interface Payment {
+  id: string;
+  project_id: string;
+  concept: string;
+  amount: number;
+  status: PaymentStatus;
+  due_date: string | null;
+  paid_at: string | null;
+  payment_method: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type PaymentInsert = Omit<Payment, "id" | "created_at" | "updated_at">;
+export type PaymentUpdate = Partial<PaymentInsert>;
+
+// Link de proyecto
+export interface ProjectLink {
+  id: string;
+  project_id: string;
+  label: string;
+  url: string;
+  type: LinkType;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProjectLinkInsert = Omit<ProjectLink, "id" | "created_at" | "updated_at">;
+export type ProjectLinkUpdate = Partial<ProjectLinkInsert>;
 
 // Usuario autenticado
 export interface AuthUser {

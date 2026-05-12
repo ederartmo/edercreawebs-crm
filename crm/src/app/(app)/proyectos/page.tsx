@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Client, ProjectInsert, ProjectWithClient } from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -38,6 +39,7 @@ function toFriendlyError(message: string): string {
 }
 
 export default function ProyectosPage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<ProjectWithClient[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
 
@@ -244,7 +246,7 @@ export default function ProyectosPage() {
                 <tbody className="divide-y divide-gray-100">
                   {projects.map((project) => (
                     <tr key={project.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 cursor-pointer" onClick={() => router.push(`/proyectos/${project.id}`)}>
                         <p className="font-medium text-gray-900">{project.title}</p>
                         <p className="text-xs text-gray-500 mt-0.5">
                           Anticipo: {toCurrency(project.deposit_amount)} ({project.deposit_paid ? "pagado" : "pendiente"})

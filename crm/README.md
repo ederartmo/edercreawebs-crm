@@ -23,6 +23,16 @@ cp .env.example .env.local
 # Ver docs/SUPABASE_SETUP.md para instrucciones detalladas
 ```
 
+Variables esperadas en `.env.local`:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=tu-publishable-key-aqui
+SUPABASE_SERVICE_ROLE_KEY=tu-service-role-key-aqui
+```
+
+`SUPABASE_SERVICE_ROLE_KEY` es solo para backend/server-side y nunca debe usarse en componentes cliente ni exponerse como `NEXT_PUBLIC_*`.
+
 ### 3. Iniciar servidor de desarrollo
 ```bash
 npm run dev

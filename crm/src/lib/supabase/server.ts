@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 
 export async function createClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   // Durante build en CI/CD sin env vars, retorna null
   if (!supabaseUrl || !supabaseKey) {

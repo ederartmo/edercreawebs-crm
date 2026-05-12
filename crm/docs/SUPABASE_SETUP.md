@@ -9,8 +9,8 @@ Este archivo documenta los pasos necesarios para configurar Supabase y aplicar e
 3. Espera a que se complete (5-10 min)
 4. Ve a **Settings → API** y copia:
    - `Project URL`
-   - `Anon key`
-   - `Service role key`
+   - `Publishable key` (pública)
+   - `Service role key` (secreta, solo backend)
 
 ## 2. Configurar variables de entorno
 
@@ -18,11 +18,17 @@ En `crm/.env.local`:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=dtu-anon-key-aqui
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=tu-publishable-key-aqui
 SUPABASE_SERVICE_ROLE_KEY=tu-service-role-key-aqui
 ```
 
-⚠️ **Nunca** expongas `SUPABASE_SERVICE_ROLE_KEY` al cliente. Solo úsalo en `src/lib/supabase/server.ts` o server-side functions.
+⚠️ **Nunca** expongas `SUPABASE_SERVICE_ROLE_KEY` al cliente. Solo úsalo en backend/server-side.
+
+Para esta fase (Auth + rutas protegidas + base para CRUD con RLS) normalmente basta con:
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+
+Deja `SUPABASE_SERVICE_ROLE_KEY` configurada solo para uso futuro en operaciones administrativas server-side.
 
 ## 3. Aplicar el Schema SQL
 
@@ -77,6 +83,8 @@ Una vez verificada la autenticación:
 
 **Notas importantes:**
 
-- Si cambias `NEXT_PUBLIC_SUPABASE_URL` o `NEXT_PUBLIC_SUPABASE_ANON_KEY`, reinicia el servidor (`npm run dev`)
-- El Service Role key está restringido a server-side únicamente por seguridad
+- `NEXT_PUBLIC_SUPABASE_URL` se obtiene en Supabase Project Settings → API
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` es la llave pública publishable
+- `SUPABASE_SERVICE_ROLE_KEY` es secreta y no debe ir al navegador
+- Si cambias `NEXT_PUBLIC_SUPABASE_URL` o `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, reinicia el servidor (`npm run dev`)
 - La autenticación usa cookies vía `@supabase/ssr` para SSR seguro

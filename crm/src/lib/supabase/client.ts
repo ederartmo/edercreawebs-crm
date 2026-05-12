@@ -2,7 +2,7 @@ import { createBrowserClient } from "@supabase/ssr";
 
 export function createClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   // Durante build, si faltan vars de entorno, retorna stub
   if (!supabaseUrl || !supabaseKey) {
@@ -11,7 +11,7 @@ export function createClient() {
       return null as any;
     }
     console.warn(
-      "Supabase credentials not found. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY"
+      "Supabase credentials not found. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
     );
     return null as any;
   }

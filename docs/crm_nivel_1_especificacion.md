@@ -421,6 +421,11 @@ El Nivel 1 se considera útil cuando permite:
 - shadcn/ui
 - Vercel
 
+## Consideración de setup inicial
+
+- El primer usuario administrador debe existir en Supabase Auth y en `profiles` con `role = admin` antes de depender de las políticas RLS endurecidas.
+- Ese alta inicial puede hacerse desde el dashboard de Supabase o con una operación privilegiada antes de habilitar el uso normal del CRM.
+
 ## Orden de construcción
 
 ### Fase 1

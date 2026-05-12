@@ -42,6 +42,7 @@ create type public.project_type as enum (
 );
 create type public.task_status as enum ('pending', 'in_progress', 'done', 'blocked');
 create type public.payment_status as enum ('pending', 'paid', 'overdue', 'cancelled');
+create type public.domain_status as enum ('pendiente', 'confirmado', 'comprado', 'conectado');
 create type public.link_type as enum (
   'drive',
   'quote',
@@ -118,7 +119,7 @@ create table if not exists public.projects (
   deposit_paid boolean not null default false,
   final_payment_amount numeric(12, 2) not null default 0,
   final_payment_paid boolean not null default false,
-  domain_status text not null default 'pendiente' check (domain_status in ('pendiente', 'confirmado', 'comprado', 'conectado')),
+  domain_status public.domain_status not null default 'pendiente',
   drive_url text,
   quote_url text,
   test_url text,

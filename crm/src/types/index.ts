@@ -111,6 +111,52 @@ export interface Client {
 export type ClientInsert = Omit<Client, "id" | "created_at" | "updated_at" | "social_links">;
 export type ClientUpdate = Partial<ClientInsert>;
 
+// Proyecto
+export interface Project {
+  id: string;
+  client_id: string;
+  lead_id: string | null;
+  title: string;
+  project_type: ProjectType;
+  status: CrmStatus;
+  total_price: number;
+  deposit_amount: number;
+  deposit_paid: boolean;
+  final_payment_amount: number;
+  final_payment_paid: boolean;
+  domain_status: DomainStatus;
+  drive_url: string | null;
+  quote_url: string | null;
+  test_url: string | null;
+  final_url: string | null;
+  start_date: string | null;
+  due_date: string | null;
+  next_action: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProjectInsert = Omit<Project, "id" | "created_at" | "updated_at">;
+export type ProjectUpdate = Partial<ProjectInsert>;
+
+export interface ProjectWithClient extends Project {
+  clients: Pick<Client, "id" | "name" | "company"> | null;
+}
+
+export interface ProjectTask {
+  id: string;
+  project_id: string;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  sort_order: number;
+  due_date: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // Usuario autenticado
 export interface AuthUser {
   id: string;

@@ -114,10 +114,14 @@ crm/
 
 ---
 
+## Mejoras pendientes
+
+- Exigir al menos email o teléfono antes de convertir un lead a cliente para reforzar prevención de duplicados.
+
 ## Siguiente fase
 
-**Fase 3:** CRUD Leads
-- Aplicar tablas del schema SQL en Supabase
-- Implementar Row-Level Security (RLS)
-- Crear componentes de CRUD (listar, crear, editar, eliminar)
-- Gestionar estados de leads
+**Fase 6:** Detalle de proyecto `/proyectos/[id]`
+- Checklist operativo del proyecto
+- Notas internas por proyecto
+- Pagos del proyecto
+- Links del proyecto (Drive, diseño, test, final)

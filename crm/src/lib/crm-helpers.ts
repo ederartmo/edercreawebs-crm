@@ -1,4 +1,4 @@
-import type { CrmStatus, LeadSource } from "@/types";
+import type { CrmStatus, DomainStatus, LeadSource, ProjectType } from "@/types";
 
 // ── CRM Status ────────────────────────────────────────────────
 
@@ -67,3 +67,36 @@ export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
 export const ALL_LEAD_SOURCES = Object.keys(
   LEAD_SOURCE_LABELS
 ) as LeadSource[];
+
+// ── Project Type ──────────────────────────────────────────────
+
+export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
+  landing_page: "Landing page",
+  sitio_web_informativo: "Sitio web informativo",
+  sitio_web_con_formulario: "Sitio web con formulario",
+  sitio_web_con_agenda: "Sitio web con agenda",
+  sitio_web_con_chatbot: "Sitio web con chatbot",
+  sitio_web_con_pagos: "Sitio web con pagos",
+  sistema_con_login: "Sistema con login",
+  portal_de_clientes: "Portal de clientes",
+  dashboard_administrativo: "Dashboard administrativo",
+  automatizacion: "Automatización",
+  mantenimiento: "Mantenimiento",
+};
+
+export const ALL_PROJECT_TYPES = Object.keys(
+  PROJECT_TYPE_LABELS
+) as ProjectType[];
+
+// ── Domain Status ─────────────────────────────────────────────
+
+export const DOMAIN_STATUS_LABELS: Record<DomainStatus, string> = {
+  pendiente: "Pendiente",
+  confirmado: "Confirmado",
+  comprado: "Comprado",
+  conectado: "Conectado",
+};
+
+export const ALL_DOMAIN_STATUSES = Object.keys(
+  DOMAIN_STATUS_LABELS
+) as DomainStatus[];

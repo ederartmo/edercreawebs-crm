@@ -1,36 +1,113 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# EderCreaWebs CRM · Nivel 1
 
-## Getting Started
+Sistema CRM interno para gestión de leads, clientes, proyectos y pagos.
 
-First, run the development server:
+**Estado:** Fase 2 · Autenticación + Rutas Protegidas
 
+---
+
+## Quick Start
+
+### 1. Instalar dependencias
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd crm
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Configurar Supabase
+```bash
+# Copiar variables de entorno
+cp .env.example .env.local
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+# Editar .env.local con tus credenciales de Supabase
+# Ver docs/SUPABASE_SETUP.md para instrucciones detalladas
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 3. Iniciar servidor de desarrollo
+```bash
+npm run dev
+```
 
-## Learn More
+Abre [http://localhost:3000](http://localhost:3000)
+- Redirige a `/login` (no hay sesión)
+- Crea usuario en Supabase Auth y prueba login/logout
 
-To learn more about Next.js, take a look at the following resources:
+### 4. Build para producción
+```bash
+npm run build
+npm start
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Tecnología
 
-## Deploy on Vercel
+- **Framework:** Next.js 16 (App Router)
+- **Lenguaje:** TypeScript
+- **Estilos:** Tailwind CSS v4
+- **UI:** shadcn/ui components
+- **Base de datos:** Supabase (PostgreSQL)
+- **Auth:** Supabase Auth + SSR cookies
+- **Protección de rutas:** Next.js Middleware
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Estructura
+
+```
+crm/
+├── src/
+│   ├── app/
+│   │   ├── (app)/            # Rutas protegidas
+│   │   │   ├── dashboard/
+│   │   │   ├── leads/
+│   │   │   ├── clientes/
+│   │   │   ├── proyectos/
+│   │   │   ├── pagos/
+│   │   │   └── layout.tsx     # Layout con sidebar + header
+│   │   ├── login/             # Ruta pública
+│   │   ├── auth/callback/     # Callback de OAuth
+│   │   └── layout.tsx         # Layout raíz
+│   ├── components/
+│   │   ├── auth/              # AuthProvider
+│   │   ├── layout/            # Sidebar, Header
+│   │   └── ui/                # shadcn/ui
+│   ├── lib/
+│   │   └── supabase/          # Clients, middleware
+│   ├── types/                 # Tipos CRM
+│   └── config/                # Navegación
+├── middleware.ts              # Protección de rutas
+└── docs/
+    └── SUPABASE_SETUP.md      # Guía de configuración
+```
+
+---
+
+## Rutas
+
+| Ruta | Estado | Requerimientos |
+|------|--------|---|
+| `/login` | Pública | – |
+| `/dashboard` | Protegida | Autenticación activa |
+| `/leads` | Protegida | Autenticación activa |
+| `/clientes` | Protegida | Autenticación activa |
+| `/proyectos` | Protegida | Autenticación activa |
+| `/pagos` | Protegida | Autenticación activa |
+
+---
+
+## Documentación
+
+- [Supabase Setup](docs/SUPABASE_SETUP.md) — Configuración de BD y auth
+- [docs/crm_nivel_1_especificacion.md](../docs/crm_nivel_1_especificacion.md) — Requisitos funcionales
+- [docs/ui_crm_nivel_1.md](../docs/ui_crm_nivel_1.md) — Wireframes
+
+---
+
+## Siguiente fase
+
+**Fase 3:** CRUD Leads
+- Aplicar tablas del schema SQL en Supabase
+- Implementar Row-Level Security (RLS)
+- Crear componentes de CRUD (listar, crear, editar, eliminar)
+- Gestionar estados de leads

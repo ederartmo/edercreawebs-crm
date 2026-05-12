@@ -5,10 +5,12 @@ import { navItems } from "@/config/navigation";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 export function Header() {
   const pathname = usePathname();
   const router = useRouter();
+  const { user } = useAuth();
 
   const current = navItems.find(
     (item) => pathname === item.href || pathname.startsWith(item.href + "/")
@@ -20,6 +22,8 @@ export function Header() {
     await supabase.auth.signOut();
     router.push("/login");
   }
+
+  if (!user) return null;
 
   return (
     <header className="flex items-center justify-between h-14 px-6 bg-white border-b border-gray-200 sticky top-0 z-30">

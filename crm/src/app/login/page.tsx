@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,13 +13,22 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Si ya hay sesión activa, redirigir a dashboard
+  useEffect(() => {
+    if (user && !authLoading) {
+      router.push("/dashboard");
+    }
+  }, [user, authLoading, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -33,12 +42,23 @@ export default function LoginPage() {
     });
 
     if (authError) {
-      setError("Credenciales incorrectas. Verifica tu correo y contraseña.");
+      setError(authError.message || "Credenciales incorrectas");
       setLoading(false);
       return;
     }
 
+    // La redirección ocurrirá automáticamente cuando useAuth detecte la sesión
     router.push("/dashboard");
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-500">Verificando sesión...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -58,7 +78,7 @@ export default function LoginPage() {
               Iniciar sesión
             </CardTitle>
             <CardDescription className="text-sm text-gray-500">
-              Acceso restringido al equipo interno.
+              Acceso restringido al equipo interno. Usa Supabase Auth.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -73,6 +93,7 @@ export default function LoginPage() {
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-1.5">
@@ -85,6 +106,7 @@ export default function LoginPage() {
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  disabled={loading}
                 />
               </div>
 
@@ -100,6 +122,10 @@ export default function LoginPage() {
             </form>
           </CardContent>
         </Card>
+
+        <p className="text-xs text-gray-400 text-center">
+          Fase 2: Auth con Supabase · Rutas protegidas por middleware
+        </p>
       </div>
     </div>
   );

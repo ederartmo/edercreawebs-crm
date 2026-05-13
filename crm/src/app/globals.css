@@ -151,8 +151,13 @@
     margin-left: 0 !important;
   }
 
+  .overflow-x-auto {
+    overflow: visible !important;
+  }
+
   main {
     padding: 0 !important;
+    margin: 0 !important;
   }
 
   /* El template ocupa todo el ancho imprimible */
@@ -162,8 +167,21 @@
     margin: 0 !important;
   }
 
+  .invoice-sheet {
+    border: 0 !important;
+  }
+
+  .invoice-block,
+  .invoice-items-table,
+  .invoice-items-table tr,
+  .invoice-items-table td,
+  .invoice-items-table th {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
   @page {
-    size: A4;
-    margin: 10mm;
+    size: A4 portrait;
+    margin: 12mm;
   }
 }

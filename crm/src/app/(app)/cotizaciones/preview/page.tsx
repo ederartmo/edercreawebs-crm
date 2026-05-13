@@ -66,7 +66,9 @@ export default function InvoicePreviewPage() {
       </div>
 
       {/* Template del invoice */}
-      <InvoiceTemplate data={MOCK_INVOICE} />
+      <div className="overflow-x-auto pb-4">
+        <InvoiceTemplate data={MOCK_INVOICE} />
+      </div>
     </>
   );
 }

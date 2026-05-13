@@ -184,9 +184,9 @@ export default function DashboardPage() {
         if (tasksRes.error) throw new Error(tasksRes.error.message);
 
         const leads = leadsRes.data ?? [];
-        const allProjects = (projectsRes.data as ProjectDashboardRow[]) ?? [];
-        const blocked = (tasksRes.data as BlockedTaskRow[]) ?? [];
-        const pending = (paymentsRes.data as PendingPaymentRow[]) ?? [];
+        const allProjects = (projectsRes.data as unknown as ProjectDashboardRow[]) ?? [];
+        const blocked = (tasksRes.data as unknown as BlockedTaskRow[]) ?? [];
+        const pending = (paymentsRes.data as unknown as PendingPaymentRow[]) ?? [];
         const paidPayments = paidPaymentsRes.data ?? [];
 
         const leadsActivos = leads.filter((lead) => lead.status !== "perdido").length;

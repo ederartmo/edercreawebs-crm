@@ -171,7 +171,7 @@ export function ProjectPaymentsSection({
               <Label htmlFor="payment-method">Método de pago</Label>
               <Select
                 value={form.payment_method}
-                onValueChange={(val) => setForm({ ...form, payment_method: val })}
+                onValueChange={(val) => setForm({ ...form, payment_method: val as string })}
                 disabled={saving}
               >
                 <SelectTrigger id="payment-method">

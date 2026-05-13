@@ -128,3 +128,42 @@
     @apply font-sans;
   }
 }
+
+/* ── Print styles: ocultar navegación al imprimir ── */
+@media print {
+  /* Ocultar sidebar, header y barra de acción */
+  aside,
+  header,
+  nav,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Quitar márgenes del layout que rodea el invoice */
+  body {
+    background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* El contenedor principal del app layout */
+  .ml-60 {
+    margin-left: 0 !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  /* El template ocupa todo el ancho imprimible */
+  #invoice-template {
+    max-width: 100% !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+  }
+
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+}

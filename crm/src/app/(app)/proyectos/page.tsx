@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Client, ProjectInsert, ProjectWithClient } from "@/types";
+import type { Client, ProjectInsert, ProjectType, ProjectWithClient } from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import {
   CRM_STATUS_COLORS,
@@ -260,7 +260,11 @@ export default function ProyectosPage() {
                         <p className="text-xs text-gray-500">{project.clients?.company ?? ""}</p>
                       </td>
                       <td className="px-4 py-3 text-gray-700">
-                        {PROJECT_TYPE_LABELS[project.project_type]}
+                        {Array.isArray(project.project_type)
+                          ? project.project_type
+                              .map((t) => PROJECT_TYPE_LABELS[t])
+                              .join(", ")
+                          : PROJECT_TYPE_LABELS[project.project_type as ProjectType]}
                       </td>
                       <td className="px-4 py-3">
                         <Badge className={`${CRM_STATUS_COLORS[project.status]} border-0`}>

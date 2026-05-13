@@ -35,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 interface ProjectFormModalProps {
   open: boolean;
@@ -47,7 +48,7 @@ interface ProjectFormModalProps {
 interface ProjectFormState {
   client_id: string;
   title: string;
-  project_type: ProjectType;
+  project_type: ProjectType[];
   status: CrmStatus;
   total_price: string;
   deposit_amount: string;
@@ -63,7 +64,8 @@ interface ProjectFormState {
 const EMPTY_FORM: ProjectFormState = {
   client_id: "",
   title: "",
-  project_type: "landing_page",
+  project_type: [],
+
   status: "lead_nuevo",
   total_price: "0",
   deposit_amount: "0",
@@ -93,7 +95,8 @@ function normalizeProjectForSave(form: ProjectFormState): ProjectInsert {
     client_id: form.client_id,
     lead_id: null,
     title: form.title.trim(),
-    project_type: form.project_type,
+    project_type: form.project_type as ProjectType[],
+
     status: form.status,
     total_price: toMoney(form.total_price),
     deposit_amount: toMoney(form.deposit_amount),
@@ -137,7 +140,9 @@ export function ProjectFormModal({
       setForm({
         client_id: project.client_id,
         title: project.title,
-        project_type: project.project_type,
+        project_type: Array.isArray(project.project_type)
+          ? project.project_type
+          : [project.project_type as ProjectType],
         status: project.status,
         total_price: String(project.total_price),
         deposit_amount: String(project.deposit_amount),
@@ -169,6 +174,10 @@ export function ProjectFormModal({
     }
     if (!form.title.trim()) {
       setError("El nombre del proyecto es obligatorio.");
+      return;
+    }
+    if (form.project_type.length === 0) {
+      setError("Selecciona al menos un tipo de proyecto.");
       return;
     }
     if (!form.next_action.trim()) {
@@ -234,25 +243,44 @@ export function ProjectFormModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1.5">
-              <Label>Tipo de proyecto</Label>
-              <Select
-                value={form.project_type}
-                onValueChange={(v) => set("project_type", v as ProjectType)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue>{PROJECT_TYPE_LABELS[form.project_type]}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {ALL_PROJECT_TYPES.map((type) => (
-                    <SelectItem key={type} value={type}>
-                      {PROJECT_TYPE_LABELS[type]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          <div className="space-y-1.5 col-span-3">
+            <Label>
+              Herramientas / Tipo de proyecto{" "}
+              <span className="text-red-500">*</span>
+              {form.project_type.length > 0 && (
+                <span className="ml-1.5 text-xs font-normal text-gray-500">
+                  ({form.project_type.length} seleccionado{form.project_type.length !== 1 ? "s" : ""})
+                </span>
+              )}
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              {ALL_PROJECT_TYPES.map((type) => {
+                const isSelected = form.project_type.includes(type);
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => {
+                      const next = isSelected
+                        ? form.project_type.filter((t) => t !== type)
+                        : [...form.project_type, type];
+                      set("project_type", next);
+                    }}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                      isSelected
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : "border-gray-300 bg-white text-gray-700 hover:border-blue-400 hover:text-blue-600"
+                    )}
+                  >
+                    {PROJECT_TYPE_LABELS[type]}
+                  </button>
+                );
+              })}
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Estado</Label>
               <Select

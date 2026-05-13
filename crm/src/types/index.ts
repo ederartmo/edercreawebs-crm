@@ -129,7 +129,7 @@ export interface Project {
   client_id: string;
   lead_id: string | null;
   title: string;
-  project_type: ProjectType;
+  project_type: ProjectType[];
   status: CrmStatus;
   total_price: number;
   deposit_amount: number;

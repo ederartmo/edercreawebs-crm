@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type {
+  ProjectType,
   ProjectWithClient,
   ProjectTask,
   ProjectNote,
@@ -310,7 +311,13 @@ export default function ProjectDetailPage() {
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-600">Tipo:</span>
-              <span className="font-medium">{PROJECT_TYPE_LABELS[project.project_type]}</span>
+              <span className="font-medium">
+                {Array.isArray(project.project_type)
+                  ? project.project_type
+                      .map((t) => PROJECT_TYPE_LABELS[t])
+                      .join(", ")
+                  : PROJECT_TYPE_LABELS[project.project_type as ProjectType]}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-600">Próxima acción:</span>

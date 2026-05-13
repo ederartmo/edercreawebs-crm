@@ -201,15 +201,15 @@ export function ProjectFormModal({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden !flex !flex-col">
         <DialogHeader>
           <DialogTitle className="text-base font-semibold">
             {project ? "Editar proyecto" : "Nuevo proyecto"}
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-          <div className="space-y-4 overflow-y-auto pt-1 pr-1">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-0">
+          <div className="space-y-4 overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Cliente</Label>

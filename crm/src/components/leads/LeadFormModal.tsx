@@ -131,146 +131,148 @@ export function LeadFormModal({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-hidden !flex !flex-col">
         <DialogHeader>
           <DialogTitle className="text-base font-semibold">
             {lead ? "Editar lead" : "Nuevo lead"}
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4 pt-1">
-          {/* Nombre */}
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-name">
-              Nombre <span className="text-red-500">*</span>
-            </Label>
-            <Input
-              id="lead-name"
-              value={toStr(form.name)}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="Ej: Juan García"
-              autoFocus
-            />
-          </div>
-
-          {/* Empresa y teléfono */}
-          <div className="grid grid-cols-2 gap-3">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-0">
+          <div className="space-y-4 overflow-y-auto pr-1">
+            {/* Nombre */}
             <div className="space-y-1.5">
-              <Label htmlFor="lead-company">Empresa</Label>
+              <Label htmlFor="lead-name">
+                Nombre <span className="text-red-500">*</span>
+              </Label>
               <Input
-                id="lead-company"
-                value={toStr(form.company)}
-                onChange={(e) => set("company", e.target.value)}
-                placeholder="Empresa S.A."
+                id="lead-name"
+                value={toStr(form.name)}
+                onChange={(e) => set("name", e.target.value)}
+                placeholder="Ej: Juan García"
+                autoFocus
               />
             </div>
+
+            {/* Empresa y teléfono */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="lead-company">Empresa</Label>
+                <Input
+                  id="lead-company"
+                  value={toStr(form.company)}
+                  onChange={(e) => set("company", e.target.value)}
+                  placeholder="Empresa S.A."
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="lead-phone">Teléfono</Label>
+                <Input
+                  id="lead-phone"
+                  value={toStr(form.phone)}
+                  onChange={(e) => set("phone", e.target.value)}
+                  placeholder="+52 55 1234 5678"
+                />
+              </div>
+            </div>
+
+            {/* Email */}
             <div className="space-y-1.5">
-              <Label htmlFor="lead-phone">Teléfono</Label>
+              <Label htmlFor="lead-email">Correo electrónico</Label>
               <Input
-                id="lead-phone"
-                value={toStr(form.phone)}
-                onChange={(e) => set("phone", e.target.value)}
-                placeholder="+52 55 1234 5678"
+                id="lead-email"
+                type="email"
+                value={toStr(form.email)}
+                onChange={(e) => set("email", e.target.value)}
+                placeholder="lead@correo.com"
               />
             </div>
-          </div>
 
-          {/* Email */}
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-email">Correo electrónico</Label>
-            <Input
-              id="lead-email"
-              type="email"
-              value={toStr(form.email)}
-              onChange={(e) => set("email", e.target.value)}
-              placeholder="lead@correo.com"
-            />
-          </div>
-
-          {/* Fuente y Estado */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Fuente</Label>
-              <Select
-                value={form.source}
-                onValueChange={(v) => set("source", v as LeadSource)}
-              >
-                <SelectTrigger>
-                  <SelectValue>{LEAD_SOURCE_LABELS[form.source]}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {ALL_LEAD_SOURCES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {LEAD_SOURCE_LABELS[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {/* Fuente y Estado */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Fuente</Label>
+                <Select
+                  value={form.source}
+                  onValueChange={(v) => set("source", v as LeadSource)}
+                >
+                  <SelectTrigger>
+                    <SelectValue>{LEAD_SOURCE_LABELS[form.source]}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ALL_LEAD_SOURCES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {LEAD_SOURCE_LABELS[s]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Estado</Label>
+                <Select
+                  value={form.status}
+                  onValueChange={(v) => set("status", v as CrmStatus)}
+                >
+                  <SelectTrigger>
+                    <SelectValue>{CRM_STATUS_LABELS[form.status]}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LEAD_STATUSES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {CRM_STATUS_LABELS[s]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+
+            {/* Tipo de negocio */}
             <div className="space-y-1.5">
-              <Label>Estado</Label>
-              <Select
-                value={form.status}
-                onValueChange={(v) => set("status", v as CrmStatus)}
-              >
-                <SelectTrigger>
-                  <SelectValue>{CRM_STATUS_LABELS[form.status]}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {LEAD_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {CRM_STATUS_LABELS[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="lead-business">Tipo de negocio</Label>
+              <Input
+                id="lead-business"
+                value={toStr(form.business_type)}
+                onChange={(e) => set("business_type", e.target.value)}
+                placeholder="Ej: Restaurante, Tienda en línea..."
+              />
             </div>
+
+            {/* Qué necesita */}
+            <div className="space-y-1.5">
+              <Label htmlFor="lead-need">Qué necesita</Label>
+              <Textarea
+                id="lead-need"
+                value={toStr(form.need_summary)}
+                onChange={(e) => set("need_summary", e.target.value)}
+                placeholder="Ej: Sitio web con formulario de contacto"
+                rows={3}
+                className="resize-none"
+              />
+            </div>
+
+            {/* Notas */}
+            <div className="space-y-1.5">
+              <Label htmlFor="lead-notes">Notas internas</Label>
+              <Textarea
+                id="lead-notes"
+                value={toStr(form.notes)}
+                onChange={(e) => set("notes", e.target.value)}
+                placeholder="Notas privadas sobre el lead..."
+                rows={3}
+                className="resize-none"
+              />
+            </div>
+
+            {error && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                {error}
+              </p>
+            )}
           </div>
 
-          {/* Tipo de negocio */}
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-business">Tipo de negocio</Label>
-            <Input
-              id="lead-business"
-              value={toStr(form.business_type)}
-              onChange={(e) => set("business_type", e.target.value)}
-              placeholder="Ej: Restaurante, Tienda en línea..."
-            />
-          </div>
-
-          {/* Qué necesita */}
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-need">Qué necesita</Label>
-            <Textarea
-              id="lead-need"
-              value={toStr(form.need_summary)}
-              onChange={(e) => set("need_summary", e.target.value)}
-              placeholder="Ej: Sitio web con formulario de contacto"
-              rows={3}
-              className="resize-none"
-            />
-          </div>
-
-          {/* Notas */}
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-notes">Notas internas</Label>
-            <Textarea
-              id="lead-notes"
-              value={toStr(form.notes)}
-              onChange={(e) => set("notes", e.target.value)}
-              placeholder="Notas privadas sobre el lead..."
-              rows={3}
-              className="resize-none"
-            />
-          </div>
-
-          {error && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-              {error}
-            </p>
-          )}
-
-          <DialogFooter className="pt-2">
+          <DialogFooter className="pt-3 mt-3 border-t">
             <Button
               type="button"
               variant="outline"

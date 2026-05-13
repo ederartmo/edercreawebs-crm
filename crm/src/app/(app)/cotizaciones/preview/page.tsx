@@ -16,6 +16,7 @@ const MOCK_INVOICE: InvoiceData = {
   },
   clientName: "Cliente Ejemplo S.A. de C.V.",
   clientEmail: "cliente@ejemplo.com",
+  clientReference: "edercreawebs.com/rediseno-corporativo",
   items: [
     {
       id: "1",
@@ -34,6 +35,9 @@ const MOCK_INVOICE: InvoiceData = {
       total: 1200,
     },
   ],
+  subtotal: 10000,
+  discount: 0,
+  tax: 0,
   grandTotal: 10000,
   payment: {
     payableTo: "EderCreaWebs",
@@ -42,9 +46,14 @@ const MOCK_INVOICE: InvoiceData = {
     clabe: "**** **** **** 0960",
     swift: "MENOMXMTXXX",
     paymentMethod: "Transferencia Bancaria / Western Union",
+    location: "Ciudad de Mexico, Mexico",
   },
   notes:
-    "El proyecto se paga en dos partes:\n• 50% de anticipo para iniciar el proyecto.\n• 50% restante contra entrega final.\n\nEl hosting y dominio son anuales y deben renovarse cada año.",
+    "El proyecto se paga en dos partes:\n• 50% de anticipo para iniciar el proyecto.\n• 50% restante contra entrega final.",
+  projectConditions:
+    "El hosting y dominio son anuales y deben renovarse cada año. Los cambios fuera de alcance se cotizan por separado.",
+  observations:
+    "La presente cotizacion tiene vigencia de 15 dias naturales.",
   serviceDescription:
     "El servicio incluye:\n• Diseño web personalizado basado en identidad de marca.\n• Desarrollo con tecnología moderna (Next.js / React).\n• Sitio responsivo optimizado para móvil, tablet y escritorio.\n• Integración de formulario de contacto con notificaciones por email.\n• Optimización SEO básica (meta tags, Open Graph, sitemap).\n• Panel de administración de contenido (si aplica).\n• Entrega con documentación de accesos y capacitación básica.\n• Soporte técnico 30 días después de la entrega.",
 };

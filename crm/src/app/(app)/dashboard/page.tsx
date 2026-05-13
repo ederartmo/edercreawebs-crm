@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { CrmStatus, PaymentStatus } from "@/types";
 import { createClient } from "@/lib/supabase/client";
-import { CRM_STATUS_COLORS, CRM_STATUS_LABELS } from "@/lib/crm-helpers";
+import { CRM_STATUS_COLORS, CRM_STATUS_LABELS, NON_ACTIVE_LEAD_STATUSES } from "@/lib/crm-helpers";
 import {
   Card,
   CardContent,
@@ -189,7 +189,9 @@ export default function DashboardPage() {
         const pending = (paymentsRes.data as unknown as PendingPaymentRow[]) ?? [];
         const paidPayments = paidPaymentsRes.data ?? [];
 
-        const leadsActivos = leads.filter((lead) => lead.status !== "perdido").length;
+        const leadsActivos = leads.filter(
+          (lead) => !NON_ACTIVE_LEAD_STATUSES.includes(lead.status)
+        ).length;
         const leadsCotizacion = leads.filter(
           (lead) => lead.status === "cotizacion_enviada"
         ).length;

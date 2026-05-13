@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Payment, PaymentStatus, PaymentMethod } from "@/types";
 import { PAYMENT_METHOD_LABELS, ALL_PAYMENT_METHODS } from "@/lib/crm-helpers";
 import { createClient } from "@/lib/supabase/client";
+import { syncProjectPaymentFlags } from "@/lib/payment-sync";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -123,10 +124,21 @@ export default function PagosPage() {
 
       if (error) throw new Error(error.message);
 
+      if (payment.project_id) {
+        await syncProjectPaymentFlags(supabase, payment.project_id);
+      }
+
       setPayments((prev) =>
         prev.map((p) =>
           p.id === payment.id ? { ...p, status: newStatus, paid_at: paid_at ?? null } : p
         )
+      );
+      setFetchError(null);
+    } catch (err) {
+      setFetchError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo actualizar el estado del pago."
       );
     } finally {
       setUpdatingId(null);

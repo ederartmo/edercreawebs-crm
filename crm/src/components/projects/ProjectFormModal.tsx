@@ -10,11 +10,11 @@ import type {
   ProjectWithClient,
 } from "@/types";
 import {
-  ALL_CRM_STATUSES,
   ALL_DOMAIN_STATUSES,
   ALL_PROJECT_TYPES,
   CRM_STATUS_LABELS,
   DOMAIN_STATUS_LABELS,
+  PROJECT_STATUSES,
   PROJECT_TYPE_LABELS,
 } from "@/lib/crm-helpers";
 import {
@@ -292,7 +292,7 @@ export function ProjectFormModal({
                   <SelectValue>{CRM_STATUS_LABELS[form.status]}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {ALL_CRM_STATUSES.map((status) => (
+                  {PROJECT_STATUSES.map((status) => (
                     <SelectItem key={status} value={status}>
                       {CRM_STATUS_LABELS[status]}
                     </SelectItem>

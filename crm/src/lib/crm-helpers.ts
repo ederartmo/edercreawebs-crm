@@ -14,6 +14,7 @@ export const CRM_STATUS_LABELS: Record<CrmStatus, string> = {
   diagnostico: "Diagnóstico",
   cotizacion_enviada: "Cotización enviada",
   esperando_anticipo: "Esperando anticipo",
+  cliente_ganado: "Cliente ganado",
   info_pendiente: "Info pendiente",
   diseno: "Diseño",
   diseno_enviado: "Diseño enviado",
@@ -33,6 +34,7 @@ export const CRM_STATUS_COLORS: Record<CrmStatus, string> = {
   diagnostico: "bg-indigo-100 text-indigo-800",
   cotizacion_enviada: "bg-violet-100 text-violet-800",
   esperando_anticipo: "bg-amber-100 text-amber-800",
+  cliente_ganado: "bg-emerald-100 text-emerald-800",
   info_pendiente: "bg-yellow-100 text-yellow-800",
   diseno: "bg-cyan-100 text-cyan-800",
   diseno_enviado: "bg-teal-100 text-teal-800",
@@ -52,7 +54,31 @@ export const LEAD_STATUSES: CrmStatus[] = [
   "diagnostico",
   "cotizacion_enviada",
   "esperando_anticipo",
+  "cliente_ganado",
   "info_pendiente",
+  "perdido",
+];
+
+export const NON_ACTIVE_LEAD_STATUSES: CrmStatus[] = [
+  "perdido",
+  "cliente_ganado",
+];
+
+export const PROJECT_STATUSES: CrmStatus[] = [
+  "lead_nuevo",
+  "diagnostico",
+  "cotizacion_enviada",
+  "esperando_anticipo",
+  "info_pendiente",
+  "diseno",
+  "diseno_enviado",
+  "ajustes_diseno",
+  "desarrollo",
+  "revision_cliente",
+  "segundo_pago_pendiente",
+  "publicado",
+  "entregado",
+  "mantenimiento",
   "perdido",
 ];
 

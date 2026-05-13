@@ -43,6 +43,8 @@ const EMPTY_FORM: LeadInsert = {
   business_type: null,
   need_summary: null,
   status: "lead_nuevo",
+  converted_client_id: null,
+  converted_at: null,
   notes: null,
   contacted_at: null,
 };
@@ -96,6 +98,8 @@ export function LeadFormModal({
         business_type: lead.business_type,
         need_summary: lead.need_summary,
         status: lead.status,
+        converted_client_id: lead.converted_client_id,
+        converted_at: lead.converted_at,
         notes: lead.notes,
         contacted_at: lead.contacted_at,
       });

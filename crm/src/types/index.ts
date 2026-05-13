@@ -7,6 +7,7 @@ export type CrmStatus =
   | "diagnostico"
   | "cotizacion_enviada"
   | "esperando_anticipo"
+  | "cliente_ganado"
   | "info_pendiente"
   | "diseno"
   | "diseno_enviado"
@@ -104,6 +105,8 @@ export interface Lead {
   business_type: string | null;
   need_summary: string | null;
   status: CrmStatus;
+  converted_client_id: string | null;
+  converted_at: string | null;
   notes: string | null;
   contacted_at: string | null;
   created_at: string;

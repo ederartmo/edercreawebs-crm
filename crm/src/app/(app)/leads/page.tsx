@@ -295,10 +295,26 @@ export default function LeadsPage() {
       const convertedNote = `[CONVERTIDO A CLIENTE ${new Date().toLocaleDateString("es-MX")}]\n${leadToConvert.notes || ""}`;
       const { error: updateError } = await supabase
         .from("leads")
-        .update({ notes: convertedNote })
+        .update({
+          notes: convertedNote,
+          status: "cliente_ganado",
+          converted_client_id: newClient.id,
+          converted_at: new Date().toISOString(),
+        })
         .eq("id", leadToConvert.id);
 
-      if (updateError) throw new Error(updateError.message);
+      if (updateError) {
+        if (
+          updateError.message.includes("cliente_ganado") ||
+          updateError.message.includes("converted_client_id") ||
+          updateError.message.includes("converted_at")
+        ) {
+          throw new Error(
+            "Falta aplicar la migración SQL para cierre de leads convertidos (status cliente_ganado y campos converted_*)."
+          );
+        }
+        throw new Error(updateError.message);
+      }
 
       // Actualizar estado local
       await fetchLeads();
@@ -447,7 +463,7 @@ export default function LeadsPage() {
                               setLeadToConvert(lead);
                               setConvertModalOpen(true);
                             }}
-                            disabled={convertingLeadId === lead.id}
+                            disabled={convertingLeadId === lead.id || lead.status === "cliente_ganado"}
                           >
                             <UserCheck className="h-3.5 w-3.5" />
                           </Button>

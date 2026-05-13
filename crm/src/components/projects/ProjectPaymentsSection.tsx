@@ -70,6 +70,7 @@ export function ProjectPaymentsSection({
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleAddPayment() {
     if (!form.concept.trim() || Number(form.amount) <= 0) return;
@@ -95,9 +96,16 @@ export function ProjectPaymentsSection({
 
   async function handleUpdateStatus(paymentId: string, newStatus: PaymentStatus) {
     setUpdatingId(paymentId);
+    setError(null);
     try {
       const paid_at = newStatus === "paid" ? new Date().toISOString() : null;
       await onUpdatePayment(paymentId, { status: newStatus, paid_at });
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo actualizar el estado del pago."
+      );
     } finally {
       setUpdatingId(null);
     }
@@ -206,6 +214,8 @@ export function ProjectPaymentsSection({
           </div>
         </div>
       )}
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {payments.length === 0 ? (
         <p className="text-sm text-gray-500">No hay pagos registrados.</p>

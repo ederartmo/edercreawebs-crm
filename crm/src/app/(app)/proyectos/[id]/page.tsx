@@ -22,6 +22,7 @@ import {
   DOMAIN_STATUS_LABELS,
   PROJECT_TYPE_LABELS,
 } from "@/lib/crm-helpers";
+import { syncProjectPaymentFlags } from "@/lib/payment-sync";
 import { ProjectChecklistSection } from "@/components/projects/ProjectChecklistSection";
 import { ProjectNotesSection } from "@/components/projects/ProjectNotesSection";
 import { ProjectPaymentsSection } from "@/components/projects/ProjectPaymentsSection";
@@ -198,6 +199,21 @@ export default function ProjectDetailPage() {
       setPayments((prev) =>
         prev.map((p) => (p.id === paymentId ? (data as Payment) : p))
       );
+
+      if (typeof updates.status !== "undefined") {
+        try {
+          const synced = await syncProjectPaymentFlags(supabase, projectId);
+          setProject((prev) => (prev ? { ...prev, ...synced } : prev));
+        } catch (syncError) {
+          throw new Error(
+            syncError instanceof Error
+              ? syncError.message
+              : "No se pudo sincronizar el estado financiero del proyecto."
+          );
+        }
+      }
+    } else {
+      throw new Error(`No se pudo actualizar el pago: ${error.message}`);
     }
   }
 

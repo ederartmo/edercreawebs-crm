@@ -117,20 +117,22 @@ const INITIAL_FORM_STATE: QuoteFormState = {
     location: "Guadalajara, Jalisco, Mexico",
   },
   items: [
-    createEmptyItem({
+    {
+      id: "item-1",
       item: "Website Building",
       description:
         "Sitio web corporativo responsivo con hasta 5 secciones, formulario de contacto y SEO basico.",
       qty: "1",
       price: "8800",
-    }),
-    createEmptyItem({
+    },
+    {
+      id: "item-2",
       item: "Dominio y hosting anual",
       description:
         "Dominio .com por 12 meses, hosting compartido y certificado SSL incluido.",
       qty: "1",
       price: "1200",
-    }),
+    },
   ],
 };
 

@@ -4,21 +4,6 @@ interface InvoicePaymentDetailsProps {
   payment: PaymentDetailsType;
 }
 
-function maskAccountValue(value: string): string {
-  const compactValue = value.replace(/\s+/g, "");
-  if (!compactValue) {
-    return "N/A";
-  }
-  if (compactValue.includes("*") || compactValue.toUpperCase().includes("X")) {
-    return value;
-  }
-  if (compactValue.length <= 4) {
-    return "••••";
-  }
-
-  return `${value.slice(0, 2)}••••${value.slice(-2)}`;
-}
-
 export function InvoicePaymentDetails({ payment }: InvoicePaymentDetailsProps) {
   return (
     <div className="border border-gray-200 rounded-md p-5 bg-gray-50/75">
@@ -35,10 +20,46 @@ export function InvoicePaymentDetails({ payment }: InvoicePaymentDetailsProps) {
               <span className="text-gray-500 w-32 shrink-0">Business:</span>
               <span className="font-semibold text-gray-900">{payment.payableTo}</span>
             </div>
+            {payment.firstName && (
+              <div className="flex gap-2">
+                <span className="text-gray-500 w-32 shrink-0">First Name:</span>
+                <span className="text-gray-800">{payment.firstName}</span>
+              </div>
+            )}
+            {payment.lastName && (
+              <div className="flex gap-2">
+                <span className="text-gray-500 w-32 shrink-0">Last Name:</span>
+                <span className="text-gray-800">{payment.lastName}</span>
+              </div>
+            )}
+            {payment.secondLastName && (
+              <div className="flex gap-2">
+                <span className="text-gray-500 w-32 shrink-0">Second Last Name:</span>
+                <span className="text-gray-800">{payment.secondLastName}</span>
+              </div>
+            )}
             {payment.accountHolder && (
               <div className="flex gap-2">
                 <span className="text-gray-500 w-32 shrink-0">Account Holder:</span>
                 <span className="text-gray-800">{payment.accountHolder}</span>
+              </div>
+            )}
+            {payment.country && (
+              <div className="flex gap-2">
+                <span className="text-gray-500 w-32 shrink-0">Country:</span>
+                <span className="text-gray-800">{payment.country}</span>
+              </div>
+            )}
+            {payment.state && (
+              <div className="flex gap-2">
+                <span className="text-gray-500 w-32 shrink-0">State:</span>
+                <span className="text-gray-800">{payment.state}</span>
+              </div>
+            )}
+            {payment.city && (
+              <div className="flex gap-2">
+                <span className="text-gray-500 w-32 shrink-0">City:</span>
+                <span className="text-gray-800">{payment.city}</span>
               </div>
             )}
             {payment.location && (
@@ -66,13 +87,13 @@ export function InvoicePaymentDetails({ payment }: InvoicePaymentDetailsProps) {
             <div className="flex gap-2">
               <span className="text-gray-500 w-32 shrink-0">CLABE:</span>
               <span className="text-gray-800 font-mono tracking-wide">
-                {maskAccountValue(payment.clabe)}
+                {payment.clabe || "N/A"}
               </span>
             </div>
             <div className="flex gap-2">
               <span className="text-gray-500 w-32 shrink-0">SWIFT / BIC:</span>
               <span className="text-gray-800 font-mono tracking-wide">
-                {maskAccountValue(payment.swift)}
+                {payment.swift || "N/A"}
               </span>
             </div>
           </div>

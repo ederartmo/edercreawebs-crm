@@ -18,6 +18,7 @@ function formatCurrency(amount: number, currency: string): string {
 export function InvoiceTemplate({ data }: InvoiceTemplateProps) {
   const subtotal = data.subtotal ?? data.grandTotal;
   const discount = data.discount ?? 0;
+  const taxRate = data.taxRate ?? 0;
   const tax = data.tax ?? 0;
 
   return (
@@ -110,18 +111,14 @@ export function InvoiceTemplate({ data }: InvoiceTemplateProps) {
               <span>Subtotal</span>
               <span className="tabular-nums">{formatCurrency(subtotal, data.currency)}</span>
             </div>
-            {discount > 0 && (
-              <div className="flex justify-between py-2 text-sm text-gray-600 px-1">
-                <span>Discount</span>
-                <span className="tabular-nums">-{formatCurrency(discount, data.currency)}</span>
-              </div>
-            )}
-            {tax > 0 && (
-              <div className="flex justify-between py-2 text-sm text-gray-600 px-1">
-                <span>IVA</span>
-                <span className="tabular-nums">{formatCurrency(tax, data.currency)}</span>
-              </div>
-            )}
+            <div className="flex justify-between py-2 text-sm text-gray-600 px-1">
+              <span>Descuento</span>
+              <span className="tabular-nums">-{formatCurrency(discount, data.currency)}</span>
+            </div>
+            <div className="flex justify-between py-2 text-sm text-gray-600 px-1">
+              <span>IVA {taxRate}%</span>
+              <span className="tabular-nums">{formatCurrency(tax, data.currency)}</span>
+            </div>
             <div className="border-t border-gray-300 my-1.5" />
             <div className="flex justify-between items-end py-3 bg-gray-900 text-white px-5 rounded-md shadow-sm">
               <span className="text-xs font-bold uppercase tracking-[0.18em]">

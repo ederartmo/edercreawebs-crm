@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import { InvoiceTemplate } from "@/components/invoices/InvoiceTemplate";
@@ -17,6 +17,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { createClient } from "@/lib/supabase/client";
+import type { Client } from "@/types";
 import { InvoiceData, InvoiceItem } from "@/types/invoice";
 
 interface QuoteFormItem {
@@ -32,8 +34,8 @@ interface QuoteFormState {
   date: string;
   clientName: string;
   clientReference: string;
-  discount: string;
-  tax: string;
+  discountAmount: string;
+  taxRate: string;
   notes: string;
   projectConditions: string;
   observations: string;
@@ -43,15 +45,27 @@ interface QuoteFormState {
     bank: string;
     clabe: string;
     swift: string;
+    firstName: string;
+    lastName: string;
+    secondLastName: string;
+    country: string;
+    state: string;
+    city: string;
     location: string;
   };
   items: QuoteFormItem[];
 }
 
+interface ClientLookupOption {
+  id: string;
+  value: string;
+  label: string;
+}
+
 const DEFAULT_CONTACT = {
   name: "Eder Arteaga Mora",
   email: "contacto@edercreawebs.com",
-  phone: "+52 (55) 1234-5678",
+  phone: "+52 (33) 1460-9228",
   website: "www.edercreawebs.com",
   address: "Mexico",
 };
@@ -80,8 +94,8 @@ const INITIAL_FORM_STATE: QuoteFormState = {
   date: "2026-05-13",
   clientName: "Cliente / Empresa",
   clientReference: "edercreawebs.com/landing-page-premium",
-  discount: "0",
-  tax: "0",
+  discountAmount: "0",
+  taxRate: "16",
   notes:
     "50% de anticipo para iniciar el proyecto.\n50% restante contra entrega final.",
   projectConditions:
@@ -90,11 +104,17 @@ const INITIAL_FORM_STATE: QuoteFormState = {
     "Hosting y dominio se renuevan de forma anual.",
   payment: {
     payableTo: "EderCreaWebs",
-    paymentMethod: "Transferencia bancaria",
-    bank: "Banorte",
-    clabe: "**** **** **** 0960",
-    swift: "XXXXXXXXXXX",
-    location: "Ciudad de Mexico, Mexico",
+    paymentMethod: "Western Union",
+    bank: "Banco Mercantil del Norte (Banorte)",
+    clabe: "072320013047400960",
+    swift: "MENOMXMTXXX",
+    firstName: "Eder",
+    lastName: "Arteaga",
+    secondLastName: "Mora",
+    country: "Mexico",
+    state: "Jalisco",
+    city: "Guadalajara",
+    location: "Guadalajara, Jalisco, Mexico",
   },
   items: [
     createEmptyItem({
@@ -121,6 +141,10 @@ function parseAmount(value: string): number {
 
 function roundCurrency(amount: number): number {
   return Math.round(amount * 100) / 100;
+}
+
+function clampPositive(amount: number): number {
+  return Math.max(amount, 0);
 }
 
 function calculateItemTotal(item: QuoteFormItem): number {
@@ -158,14 +182,33 @@ function buildPreviewItems(items: QuoteFormItem[]): InvoiceItem[] {
   }));
 }
 
+function buildClientLabel(client: Pick<Client, "name" | "company">): string {
+  const company = client.company?.trim() ?? "";
+  const name = client.name?.trim() ?? "";
+
+  if (company && name) {
+    return `${company} - ${name}`;
+  }
+  if (company) {
+    return company;
+  }
+  if (name) {
+    return name;
+  }
+
+  return "Cliente sin nombre";
+}
+
 function buildInvoiceData(form: QuoteFormState): InvoiceData {
   const items = buildPreviewItems(form.items);
   const subtotal = roundCurrency(
     items.reduce((total, item) => total + item.total, 0)
   );
-  const discount = roundCurrency(parseAmount(form.discount));
-  const tax = roundCurrency(parseAmount(form.tax));
-  const grandTotal = roundCurrency(Math.max(subtotal - discount + tax, 0));
+  const discount = roundCurrency(clampPositive(parseAmount(form.discountAmount)));
+  const taxRate = roundCurrency(clampPositive(parseAmount(form.taxRate)));
+  const taxableBase = roundCurrency(Math.max(subtotal - discount, 0));
+  const tax = roundCurrency((taxableBase * taxRate) / 100);
+  const grandTotal = roundCurrency(taxableBase + tax);
 
   return {
     invoiceNumber: form.invoiceNumber || "ECW-2026-002",
@@ -178,14 +221,21 @@ function buildInvoiceData(form: QuoteFormState): InvoiceData {
     items,
     subtotal,
     discount,
+    taxRate,
     tax,
     grandTotal,
     payment: {
       payableTo: form.payment.payableTo || "EderCreaWebs",
-      paymentMethod: form.payment.paymentMethod || "Transferencia bancaria",
+      paymentMethod: form.payment.paymentMethod || "Western Union",
       bank: form.payment.bank || "Banco por definir",
-      clabe: form.payment.clabe || "**** **** **** 0000",
-      swift: form.payment.swift || "XXXXXXXXXXX",
+      clabe: form.payment.clabe || "072320013047400960",
+      swift: form.payment.swift || "MENOMXMTXXX",
+      firstName: form.payment.firstName || "Eder",
+      lastName: form.payment.lastName || "Arteaga",
+      secondLastName: form.payment.secondLastName || "Mora",
+      country: form.payment.country || "Mexico",
+      state: form.payment.state || "Jalisco",
+      city: form.payment.city || "Guadalajara",
       location: form.payment.location || "Ciudad, Estado, Pais",
     },
     notes:
@@ -210,9 +260,50 @@ function formatCurrency(amount: number): string {
 
 export function QuoteBuilder() {
   const [form, setForm] = useState<QuoteFormState>(INITIAL_FORM_STATE);
+  const [clientOptions, setClientOptions] = useState<ClientLookupOption[]>([]);
+  const [loadingClients, setLoadingClients] = useState(false);
+  const [clientLoadError, setClientLoadError] = useState<string | null>(null);
+  const supabase = useMemo(() => createClient(), []);
 
   const previewData = buildInvoiceData(form);
   const itemTotals = form.items.map((item) => calculateItemTotal(item));
+  const invoiceTaxRate = previewData.taxRate ?? 0;
+
+  useEffect(() => {
+    async function fetchClients() {
+      if (!supabase) {
+        setClientLoadError("Supabase no esta configurado. Puedes escribir cliente manualmente.");
+        return;
+      }
+
+      setLoadingClients(true);
+      setClientLoadError(null);
+
+      const { data, error } = await supabase
+        .from("clients")
+        .select("id, name, company")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        setClientLoadError(error.message);
+        setLoadingClients(false);
+        return;
+      }
+
+      const normalizedOptions = ((data ?? []) as Pick<Client, "id" | "name" | "company">[])
+        .map((client) => ({
+          id: client.id,
+          value: buildClientLabel(client),
+          label: buildClientLabel(client),
+        }))
+        .filter((client, index, all) => all.findIndex((entry) => entry.value === client.value) === index);
+
+      setClientOptions(normalizedOptions);
+      setLoadingClients(false);
+    }
+
+    fetchClients();
+  }, [supabase]);
 
   function handleFieldChange<K extends keyof QuoteFormState>(
     field: K,
@@ -272,7 +363,7 @@ export function QuoteBuilder() {
 
   return (
     <div className="space-y-6">
-      <div className="print:hidden flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="print:hidden flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">
             Nueva cotizacion
@@ -285,7 +376,7 @@ export function QuoteBuilder() {
         <PrintButton />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] print:block">
+      <div className="grid gap-6 xl:grid-cols-[minmax(20rem,28rem)_minmax(0,1fr)] print:block">
         <div className="space-y-5 print:hidden">
           <Card>
             <CardHeader>
@@ -324,12 +415,29 @@ export function QuoteBuilder() {
                 <Label htmlFor="client-name">Cliente / empresa</Label>
                 <Input
                   id="client-name"
+                  list="clients-lookup-list"
                   value={form.clientName}
                   onChange={(event) =>
                     handleFieldChange("clientName", event.target.value)
                   }
                   placeholder="Nombre comercial o razon social"
                 />
+                <datalist id="clients-lookup-list">
+                  {clientOptions.map((client) => (
+                    <option key={client.id} value={client.value}>
+                      {client.label}
+                    </option>
+                  ))}
+                </datalist>
+                <p className="text-xs text-gray-500">
+                  Escribe libremente o selecciona un cliente guardado.
+                </p>
+                {loadingClients && (
+                  <p className="text-xs text-gray-400">Cargando clientes guardados...</p>
+                )}
+                {clientLoadError && (
+                  <p className="text-xs text-amber-700">{clientLoadError}</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -465,7 +573,7 @@ export function QuoteBuilder() {
             <CardHeader>
               <CardTitle>Totales</CardTitle>
               <CardDescription>
-                Subtotal automatico con descuento e IVA opcionales.
+                Subtotal automatico con descuento en MXN e IVA por porcentaje.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -479,30 +587,45 @@ export function QuoteBuilder() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="discount">Descuento</Label>
+                  <Label htmlFor="discount">Descuento MXN</Label>
                   <Input
                     id="discount"
                     type="number"
                     min="0"
                     step="0.01"
-                    value={form.discount}
+                    value={form.discountAmount}
                     onChange={(event) =>
-                      handleFieldChange("discount", event.target.value)
+                      handleFieldChange("discountAmount", event.target.value)
                     }
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="tax">IVA</Label>
+                  <Label htmlFor="tax-rate">IVA %</Label>
                   <Input
-                    id="tax"
+                    id="tax-rate"
                     type="number"
                     min="0"
                     step="0.01"
-                    value={form.tax}
+                    value={form.taxRate}
                     onChange={(event) =>
-                      handleFieldChange("tax", event.target.value)
+                      handleFieldChange("taxRate", event.target.value)
                     }
                   />
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+                <div className="flex items-center justify-between gap-3 text-sm text-gray-600">
+                  <span>Base IVA</span>
+                  <span className="font-medium tabular-nums">
+                    {formatCurrency(roundCurrency(Math.max((previewData.subtotal ?? 0) - (previewData.discount ?? 0), 0)))}
+                  </span>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3 text-sm text-gray-600">
+                  <span>IVA {invoiceTaxRate}%</span>
+                  <span className="font-medium tabular-nums">
+                    {formatCurrency(previewData.tax ?? 0)}
+                  </span>
                 </div>
               </div>
 
@@ -568,7 +691,7 @@ export function QuoteBuilder() {
             <CardHeader>
               <CardTitle>Datos de pago</CardTitle>
               <CardDescription>
-                Mantiene placeholders o valores enmascarados para la preview.
+                Muestra datos de cobro completos para que el cliente pueda pagar.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -607,7 +730,7 @@ export function QuoteBuilder() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="payment-location">Ciudad / estado / pais</Label>
+                  <Label htmlFor="payment-location">Ubicacion</Label>
                   <Input
                     id="payment-location"
                     value={form.payment.location}
@@ -620,25 +743,91 @@ export function QuoteBuilder() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="clabe">CLABE enmascarada</Label>
+                  <Label htmlFor="clabe">CLABE</Label>
                   <Input
                     id="clabe"
                     value={form.payment.clabe}
                     onChange={(event) =>
                       handlePaymentChange("clabe", event.target.value)
                     }
-                    placeholder="**** **** **** 0000"
+                    placeholder="072320013047400960"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="swift">SWIFT enmascarado</Label>
+                  <Label htmlFor="swift">SWIFT</Label>
                   <Input
                     id="swift"
                     value={form.payment.swift}
                     onChange={(event) =>
                       handlePaymentChange("swift", event.target.value)
                     }
-                    placeholder="XXXXXXXXXXX"
+                    placeholder="MENOMXMTXXX"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="payment-first-name">First Name</Label>
+                  <Input
+                    id="payment-first-name"
+                    value={form.payment.firstName}
+                    onChange={(event) =>
+                      handlePaymentChange("firstName", event.target.value)
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="payment-last-name">Last Name</Label>
+                  <Input
+                    id="payment-last-name"
+                    value={form.payment.lastName}
+                    onChange={(event) =>
+                      handlePaymentChange("lastName", event.target.value)
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="payment-second-last-name">Second Last Name</Label>
+                  <Input
+                    id="payment-second-last-name"
+                    value={form.payment.secondLastName}
+                    onChange={(event) =>
+                      handlePaymentChange("secondLastName", event.target.value)
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="payment-country">Country</Label>
+                  <Input
+                    id="payment-country"
+                    value={form.payment.country}
+                    onChange={(event) =>
+                      handlePaymentChange("country", event.target.value)
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="payment-state">State</Label>
+                  <Input
+                    id="payment-state"
+                    value={form.payment.state}
+                    onChange={(event) =>
+                      handlePaymentChange("state", event.target.value)
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="payment-city">City</Label>
+                  <Input
+                    id="payment-city"
+                    value={form.payment.city}
+                    onChange={(event) =>
+                      handlePaymentChange("city", event.target.value)
+                    }
                   />
                 </div>
               </div>
@@ -655,8 +844,10 @@ export function QuoteBuilder() {
               La plantilla se actualiza conforme capturas datos en el formulario.
             </p>
           </div>
-          <div className="overflow-x-auto pb-4">
-            <InvoiceTemplate data={previewData} />
+          <div className="preview-frame overflow-auto rounded-2xl border border-gray-200 bg-gray-100/65 p-3 md:p-4">
+            <div className="min-w-[820px] px-1 pb-2">
+              <InvoiceTemplate data={previewData} />
+            </div>
           </div>
         </div>
       </div>

@@ -155,6 +155,13 @@
     overflow: visible !important;
   }
 
+  .preview-frame {
+    overflow: visible !important;
+    border: 0 !important;
+    background: white !important;
+    padding: 0 !important;
+  }
+
   main {
     padding: 0 !important;
     margin: 0 !important;

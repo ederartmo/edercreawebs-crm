@@ -21,6 +21,7 @@ create type public.crm_status as enum (
 create type public.lead_source as enum (
   'meta_ads',
   'instagram',
+  'tiktok',
   'facebook',
   'referido',
   'whatsapp',
@@ -191,6 +192,30 @@ create table if not exists public.project_links (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
+create table if not exists public.lead_links (
+  id uuid primary key default gen_random_uuid(),
+  lead_id uuid not null references public.leads (id) on delete cascade,
+  label text not null,
+  url text not null,
+  type text not null default 'other',
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists lead_links_lead_id_idx on public.lead_links (lead_id);
+
+create table if not exists public.client_links (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references public.clients (id) on delete cascade,
+  label text not null,
+  url text not null,
+  type text not null default 'other',
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists client_links_client_id_idx on public.client_links (client_id);
+
 -- La tabla de mantenimiento puede existir desde el schema, pero la UI no es prioridad en la Fase 1.
 create table if not exists public.maintenance_contracts (
   id uuid primary key default gen_random_uuid(),
@@ -239,6 +264,14 @@ create trigger set_project_links_updated_at
 before update on public.project_links
 for each row execute function public.set_updated_at();
 
+create trigger set_lead_links_updated_at
+before update on public.lead_links
+for each row execute function public.set_updated_at();
+
+create trigger set_client_links_updated_at
+before update on public.client_links
+for each row execute function public.set_updated_at();
+
 create trigger set_maintenance_contracts_updated_at
 before update on public.maintenance_contracts
 for each row execute function public.set_updated_at();
@@ -266,6 +299,8 @@ alter table public.project_tasks enable row level security;
 alter table public.project_notes enable row level security;
 alter table public.payments enable row level security;
 alter table public.project_links enable row level security;
+alter table public.lead_links enable row level security;
+alter table public.client_links enable row level security;
 alter table public.maintenance_contracts enable row level security;
 
 -- Nivel 1 asume operación interna. Antes de producción se debe asegurar el alta del primer admin
@@ -321,6 +356,20 @@ with check (public.is_admin());
 
 create policy "admins can manage project links"
 on public.project_links
+for all
+to authenticated
+using (public.is_admin())
+with check (public.is_admin());
+
+create policy "admins can manage lead links"
+on public.lead_links
+for all
+to authenticated
+using (public.is_admin())
+with check (public.is_admin());
+
+create policy "admins can manage client links"
+on public.client_links
 for all
 to authenticated
 using (public.is_admin())

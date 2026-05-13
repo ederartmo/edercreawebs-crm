@@ -1,4 +1,10 @@
-import type { CrmStatus, DomainStatus, LeadSource, ProjectType } from "@/types";
+import type {
+  ContextLinkType,
+  CrmStatus,
+  DomainStatus,
+  LeadSource,
+  ProjectType,
+} from "@/types";
 
 // ── CRM Status ────────────────────────────────────────────────
 
@@ -57,6 +63,7 @@ export const ALL_CRM_STATUSES = Object.keys(CRM_STATUS_LABELS) as CrmStatus[];
 export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
   meta_ads: "Meta Ads",
   instagram: "Instagram",
+  tiktok: "TikTok",
   facebook: "Facebook",
   referido: "Referido",
   whatsapp: "WhatsApp",
@@ -100,3 +107,19 @@ export const DOMAIN_STATUS_LABELS: Record<DomainStatus, string> = {
 export const ALL_DOMAIN_STATUSES = Object.keys(
   DOMAIN_STATUS_LABELS
 ) as DomainStatus[];
+
+export const CONTEXT_LINK_TYPE_LABELS: Record<ContextLinkType, string> = {
+  chatgpt: "ChatGPT / diagnóstico",
+  drive_folder: "Carpeta Drive",
+  md_document: "Resumen .md",
+  google_doc: "Google Doc",
+  reference: "Referencia",
+  quote: "Cotización",
+  transcript: "Transcripción",
+  brand_assets: "Branding / assets",
+  other: "Otro",
+};
+
+export const ALL_CONTEXT_LINK_TYPES = Object.keys(
+  CONTEXT_LINK_TYPE_LABELS
+) as ContextLinkType[];

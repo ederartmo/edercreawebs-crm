@@ -1,11 +1,18 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { Client, ClientInsert } from "@/types";
+import type {
+  Client,
+  ClientInsert,
+  ClientLink,
+  ClientLinkInsert,
+  ContextLinkType,
+} from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import { ClientFormModal } from "@/components/clients/ClientFormModal";
+import { ContextLinksModal } from "@/components/links/ContextLinksModal";
 import { Button } from "@/components/ui/button";
-import { Plus, Pencil, Trash2, Mail, Phone, Globe } from "lucide-react";
+import { Plus, Pencil, Trash2, Mail, Phone, Globe, Link2 } from "lucide-react";
 
 export default function ClientesPage() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -14,6 +21,11 @@ export default function ClientesPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+
+  const [linksModalOpen, setLinksModalOpen] = useState(false);
+  const [clientForLinks, setClientForLinks] = useState<Client | null>(null);
+  const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
+  const [loadingClientLinks, setLoadingClientLinks] = useState(false);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -70,6 +82,79 @@ export default function ClientesPage() {
       setClients((prev) => prev.filter((c) => c.id !== id));
     }
     setDeletingId(null);
+  }
+
+  async function fetchClientLinks(clientId: string) {
+    if (!supabase) return;
+
+    setLoadingClientLinks(true);
+    try {
+      const { data, error } = await supabase
+        .from("client_links")
+        .select("*")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      setClientLinks((data as ClientLink[]) ?? []);
+    } finally {
+      setLoadingClientLinks(false);
+    }
+  }
+
+  async function handleOpenLinksModal(client: Client) {
+    setClientForLinks(client);
+    setLinksModalOpen(true);
+    try {
+      await fetchClientLinks(client.id);
+    } catch {
+      setClientLinks([]);
+    }
+  }
+
+  async function handleCreateClientLink(input: {
+    label: string;
+    url: string;
+    type: ContextLinkType;
+  }) {
+    if (!supabase || !clientForLinks) {
+      throw new Error("Supabase no está configurado.");
+    }
+
+    const payload: ClientLinkInsert = {
+      client_id: clientForLinks.id,
+      label: input.label,
+      url: input.url,
+      type: input.type,
+    };
+
+    const { data, error } = await supabase
+      .from("client_links")
+      .insert([payload])
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    setClientLinks((prev) => [data as ClientLink, ...prev]);
+  }
+
+  async function handleDeleteClientLink(linkId: string) {
+    if (!supabase) {
+      throw new Error("Supabase no está configurado.");
+    }
+
+    const { error } = await supabase.from("client_links").delete().eq("id", linkId);
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    setClientLinks((prev) => prev.filter((link) => link.id !== linkId));
   }
 
   return (
@@ -183,6 +268,14 @@ export default function ClientesPage() {
                           <Button
                             size="sm"
                             variant="outline"
+                            onClick={() => handleOpenLinksModal(client)}
+                            disabled={deletingId === client.id}
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
                             onClick={() => {
                               setEditingClient(client);
                               setModalOpen(true);
@@ -222,6 +315,25 @@ export default function ClientesPage() {
         }}
         onSave={editingClient ? handleEdit : handleCreate}
         client={editingClient}
+      />
+
+      <ContextLinksModal
+        open={linksModalOpen}
+        onClose={() => {
+          setLinksModalOpen(false);
+          setClientForLinks(null);
+          setClientLinks([]);
+        }}
+        title="Links de contexto del cliente"
+        description={
+          clientForLinks
+            ? `Gestiona links de contexto para ${clientForLinks.name}.`
+            : "Gestiona links de contexto para este cliente."
+        }
+        links={clientLinks}
+        loading={loadingClientLinks}
+        onCreateLink={handleCreateClientLink}
+        onDeleteLink={handleDeleteClientLink}
       />
     </div>
   );

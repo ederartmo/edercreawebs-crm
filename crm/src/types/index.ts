@@ -23,6 +23,7 @@ export type CrmStatus =
 export type LeadSource =
   | "meta_ads"
   | "instagram"
+  | "tiktok"
   | "facebook"
   | "referido"
   | "whatsapp"
@@ -63,6 +64,17 @@ export type LinkType =
   | "hosting"
   | "domain"
   | "admin_panel"
+  | "other";
+
+export type ContextLinkType =
+  | "chatgpt"
+  | "drive_folder"
+  | "md_document"
+  | "google_doc"
+  | "reference"
+  | "quote"
+  | "transcript"
+  | "brand_assets"
   | "other";
 
 // Estados de mantenimiento
@@ -202,6 +214,30 @@ export interface ProjectLink {
 
 export type ProjectLinkInsert = Omit<ProjectLink, "id" | "created_at" | "updated_at">;
 export type ProjectLinkUpdate = Partial<ProjectLinkInsert>;
+
+export interface LeadLink {
+  id: string;
+  lead_id: string;
+  label: string;
+  url: string;
+  type: ContextLinkType;
+  created_at: string;
+  updated_at: string;
+}
+
+export type LeadLinkInsert = Omit<LeadLink, "id" | "created_at" | "updated_at">;
+
+export interface ClientLink {
+  id: string;
+  client_id: string;
+  label: string;
+  url: string;
+  type: ContextLinkType;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ClientLinkInsert = Omit<ClientLink, "id" | "created_at" | "updated_at">;
 
 // Usuario autenticado
 export interface AuthUser {

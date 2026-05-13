@@ -1,17 +1,26 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { Lead, LeadInsert, CrmStatus, ClientInsert } from "@/types";
+import type {
+  ClientInsert,
+  ContextLinkType,
+  CrmStatus,
+  Lead,
+  LeadInsert,
+  LeadLink,
+  LeadLinkInsert,
+} from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import {
   LEAD_SOURCE_LABELS,
 } from "@/lib/crm-helpers";
 import { LeadFormModal } from "@/components/leads/LeadFormModal";
 import { ConvertLeadModal } from "@/components/leads/ConvertLeadModal";
+import { ContextLinksModal } from "@/components/links/ContextLinksModal";
 import { LeadStatusSelect } from "@/components/leads/LeadStatusSelect";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Phone, Mail, UserCheck } from "lucide-react";
+import { Plus, Pencil, Trash2, Phone, Mail, UserCheck, Link2 } from "lucide-react";
 
 export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -24,6 +33,11 @@ export default function LeadsPage() {
   const [convertModalOpen, setConvertModalOpen] = useState(false);
   const [convertingLeadId, setConvertingLeadId] = useState<string | null>(null);
   const [leadToConvert, setLeadToConvert] = useState<Lead | null>(null);
+
+  const [linksModalOpen, setLinksModalOpen] = useState(false);
+  const [leadForLinks, setLeadForLinks] = useState<Lead | null>(null);
+  const [leadLinks, setLeadLinks] = useState<LeadLink[]>([]);
+  const [loadingLeadLinks, setLoadingLeadLinks] = useState(false);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
@@ -98,6 +112,79 @@ export default function LeadsPage() {
     setDeletingId(null);
   }
 
+  async function fetchLeadLinks(leadId: string) {
+    if (!supabase) return;
+
+    setLoadingLeadLinks(true);
+    try {
+      const { data, error } = await supabase
+        .from("lead_links")
+        .select("*")
+        .eq("lead_id", leadId)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      setLeadLinks((data as LeadLink[]) ?? []);
+    } finally {
+      setLoadingLeadLinks(false);
+    }
+  }
+
+  async function handleOpenLinksModal(lead: Lead) {
+    setLeadForLinks(lead);
+    setLinksModalOpen(true);
+    try {
+      await fetchLeadLinks(lead.id);
+    } catch {
+      setLeadLinks([]);
+    }
+  }
+
+  async function handleCreateLeadLink(input: {
+    label: string;
+    url: string;
+    type: ContextLinkType;
+  }) {
+    if (!supabase || !leadForLinks) {
+      throw new Error("Supabase no está configurado.");
+    }
+
+    const payload: LeadLinkInsert = {
+      lead_id: leadForLinks.id,
+      label: input.label,
+      url: input.url,
+      type: input.type,
+    };
+
+    const { data, error } = await supabase
+      .from("lead_links")
+      .insert([payload])
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    setLeadLinks((prev) => [data as LeadLink, ...prev]);
+  }
+
+  async function handleDeleteLeadLink(linkId: string) {
+    if (!supabase) {
+      throw new Error("Supabase no está configurado.");
+    }
+
+    const { error } = await supabase.from("lead_links").delete().eq("id", linkId);
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    setLeadLinks((prev) => prev.filter((link) => link.id !== linkId));
+  }
+
   async function handleConvertToClient() {
     if (!supabase || !leadToConvert) {
       throw new Error("Supabase no está configurado.");
@@ -156,6 +243,53 @@ export default function LeadsPage() {
         .single();
 
       if (createError) throw new Error(createError.message);
+
+      // Heredar links de contexto del lead, evitando duplicados por URL
+      const { data: linksFromLead, error: leadLinksError } = await supabase
+        .from("lead_links")
+        .select("label, url, type")
+        .eq("lead_id", leadToConvert.id);
+
+      if (leadLinksError) throw new Error(leadLinksError.message);
+
+      const leadContextLinks =
+        (linksFromLead as Array<{
+          label: string;
+          url: string;
+          type: ContextLinkType;
+        }> | null) ?? [];
+
+      if (leadContextLinks.length > 0) {
+        const { data: existingClientLinks, error: existingClientLinksError } = await supabase
+          .from("client_links")
+          .select("url")
+          .eq("client_id", newClient.id);
+
+        if (existingClientLinksError) throw new Error(existingClientLinksError.message);
+
+        const existingUrls = new Set(
+          ((existingClientLinks as Array<{ url: string }> | null) ?? []).map((link) =>
+            link.url.trim()
+          )
+        );
+
+        const linksToInsert = leadContextLinks
+          .filter((link) => !existingUrls.has(link.url.trim()))
+          .map((link) => ({
+            client_id: newClient.id,
+            label: link.label,
+            url: link.url,
+            type: link.type,
+          }));
+
+        if (linksToInsert.length > 0) {
+          const { error: copyLinksError } = await supabase
+            .from("client_links")
+            .insert(linksToInsert);
+
+          if (copyLinksError) throw new Error(copyLinksError.message);
+        }
+      }
 
       // Actualizar lead con nota de conversión
       const convertedNote = `[CONVERTIDO A CLIENTE ${new Date().toLocaleDateString("es-MX")}]\n${leadToConvert.notes || ""}`;
@@ -298,6 +432,15 @@ export default function LeadsPage() {
                           <Button
                             variant="ghost"
                             size="sm"
+                            className="h-7 w-7 p-0 text-gray-500 hover:text-blue-600"
+                            title="Links de contexto"
+                            onClick={() => handleOpenLinksModal(lead)}
+                          >
+                            <Link2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             className="h-7 w-7 p-0 text-gray-500 hover:text-green-600"
                             title="Convertir a cliente"
                             onClick={() => {
@@ -359,6 +502,25 @@ export default function LeadsPage() {
         }}
         onConfirm={handleConvertToClient}
         lead={leadToConvert}
+      />
+
+      <ContextLinksModal
+        open={linksModalOpen}
+        onClose={() => {
+          setLinksModalOpen(false);
+          setLeadForLinks(null);
+          setLeadLinks([]);
+        }}
+        title="Links de contexto del lead"
+        description={
+          leadForLinks
+            ? `Gestiona links de diagnóstico y contexto para ${leadForLinks.name}.`
+            : "Gestiona links de diagnóstico y contexto para este lead."
+        }
+        links={leadLinks}
+        loading={loadingLeadLinks}
+        onCreateLink={handleCreateLeadLink}
+        onDeleteLink={handleDeleteLeadLink}
       />
     </div>
   );

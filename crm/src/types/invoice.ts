@@ -21,7 +21,8 @@ export interface InvoicePaymentDetails {
   clabe: string;
   swift: string;
   paymentMethod: string;
-  accountHolder: string;
+  accountHolder?: string;
+  location?: string;
 }
 
 export interface InvoiceData {
@@ -32,9 +33,15 @@ export interface InvoiceData {
   contact: InvoiceContactInfo;
   clientName: string;
   clientEmail?: string;
+  clientReference?: string;
   items: InvoiceItem[];
+  subtotal?: number;
+  discount?: number;
+  tax?: number;
   grandTotal: number;
   payment: InvoicePaymentDetails;
   notes: string;
-  serviceDescription: string;
+  projectConditions?: string;
+  observations?: string;
+  serviceDescription?: string;
 }

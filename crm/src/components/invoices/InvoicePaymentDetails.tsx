@@ -35,10 +35,18 @@ export function InvoicePaymentDetails({ payment }: InvoicePaymentDetailsProps) {
               <span className="text-gray-500 w-32 shrink-0">Business:</span>
               <span className="font-semibold text-gray-900">{payment.payableTo}</span>
             </div>
-            <div className="flex gap-2">
-              <span className="text-gray-500 w-32 shrink-0">Account Holder:</span>
-              <span className="text-gray-800">{payment.accountHolder}</span>
-            </div>
+            {payment.accountHolder && (
+              <div className="flex gap-2">
+                <span className="text-gray-500 w-32 shrink-0">Account Holder:</span>
+                <span className="text-gray-800">{payment.accountHolder}</span>
+              </div>
+            )}
+            {payment.location && (
+              <div className="flex gap-2">
+                <span className="text-gray-500 w-32 shrink-0">Location:</span>
+                <span className="text-gray-800">{payment.location}</span>
+              </div>
+            )}
           </div>
         </div>
 

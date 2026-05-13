@@ -13,5 +13,5 @@ export const navItems = [
   { href: "/clientes", label: "Clientes", icon: UserCheck },
   { href: "/proyectos", label: "Proyectos", icon: FolderKanban },
   { href: "/pagos", label: "Pagos", icon: CreditCard },
-  { href: "/cotizaciones/preview", label: "Cotizaciones", icon: FileText },
+  { href: "/cotizaciones/nueva", label: "Cotizaciones", icon: FileText },
 ];

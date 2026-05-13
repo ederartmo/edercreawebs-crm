@@ -16,6 +16,10 @@ function formatCurrency(amount: number, currency: string): string {
 }
 
 export function InvoiceTemplate({ data }: InvoiceTemplateProps) {
+  const subtotal = data.subtotal ?? data.grandTotal;
+  const discount = data.discount ?? 0;
+  const tax = data.tax ?? 0;
+
   return (
     <div
       id="invoice-template"
@@ -86,6 +90,12 @@ export function InvoiceTemplate({ data }: InvoiceTemplateProps) {
           {data.clientEmail && (
             <p className="text-sm text-gray-600 mt-1">{data.clientEmail}</p>
           )}
+          {data.clientReference && (
+            <p className="text-sm text-gray-500 mt-2">
+              <span className="font-medium text-gray-700">Project Reference:</span>{" "}
+              {data.clientReference}
+            </p>
+          )}
         </div>
 
         {/* Items table */}
@@ -98,8 +108,20 @@ export function InvoiceTemplate({ data }: InvoiceTemplateProps) {
           <div className="min-w-[330px]">
             <div className="flex justify-between py-2 text-sm text-gray-600 px-1">
               <span>Subtotal</span>
-              <span className="tabular-nums">{formatCurrency(data.grandTotal, data.currency)}</span>
+              <span className="tabular-nums">{formatCurrency(subtotal, data.currency)}</span>
             </div>
+            {discount > 0 && (
+              <div className="flex justify-between py-2 text-sm text-gray-600 px-1">
+                <span>Discount</span>
+                <span className="tabular-nums">-{formatCurrency(discount, data.currency)}</span>
+              </div>
+            )}
+            {tax > 0 && (
+              <div className="flex justify-between py-2 text-sm text-gray-600 px-1">
+                <span>IVA</span>
+                <span className="tabular-nums">{formatCurrency(tax, data.currency)}</span>
+              </div>
+            )}
             <div className="border-t border-gray-300 my-1.5" />
             <div className="flex justify-between items-end py-3 bg-gray-900 text-white px-5 rounded-md shadow-sm">
               <span className="text-xs font-bold uppercase tracking-[0.18em]">
@@ -123,6 +145,8 @@ export function InvoiceTemplate({ data }: InvoiceTemplateProps) {
           <InvoicePaymentDetails payment={data.payment} />
           <InvoiceNotes
             notes={data.notes}
+            projectConditions={data.projectConditions}
+            observations={data.observations}
             serviceDescription={data.serviceDescription}
           />
         </div>

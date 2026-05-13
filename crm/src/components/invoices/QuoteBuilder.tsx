@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 
 import { InvoiceTemplate } from "@/components/invoices/InvoiceTemplate";
@@ -17,8 +18,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { createClient } from "@/lib/supabase/client";
-import type { Client } from "@/types";
+import {
+  ALL_QUOTE_STATUSES,
+  QUOTE_STATUS_LABELS,
+} from "@/lib/crm-helpers";
+import type { Client, Quote, QuoteItem, QuoteStatus } from "@/types";
 import { InvoiceData, InvoiceItem } from "@/types/invoice";
 
 interface QuoteFormItem {
@@ -32,6 +44,8 @@ interface QuoteFormItem {
 interface QuoteFormState {
   invoiceNumber: string;
   date: string;
+  status: QuoteStatus;
+  clientId: string | null;
   clientName: string;
   clientReference: string;
   discountAmount: string;
@@ -60,6 +74,17 @@ interface ClientLookupOption {
   id: string;
   value: string;
   label: string;
+}
+
+interface QuoteBuilderProps {
+  quoteId?: string;
+}
+
+interface StoredPaymentDetails {
+  payment?: QuoteFormState["payment"];
+  client_reference?: string;
+  project_conditions?: string;
+  observations?: string;
 }
 
 const DEFAULT_CONTACT = {
@@ -92,6 +117,8 @@ function createEmptyItem(overrides?: Partial<QuoteFormItem>): QuoteFormItem {
 const INITIAL_FORM_STATE: QuoteFormState = {
   invoiceNumber: "ECW-2026-002",
   date: "2026-05-13",
+  status: "draft",
+  clientId: null,
   clientName: "Cliente / Empresa",
   clientReference: "edercreawebs.com/landing-page-premium",
   discountAmount: "0",
@@ -100,8 +127,7 @@ const INITIAL_FORM_STATE: QuoteFormState = {
     "50% de anticipo para iniciar el proyecto.\n50% restante contra entrega final.",
   projectConditions:
     "La cotizacion tiene vigencia de 15 dias. Los cambios fuera de alcance se cotizan por separado.",
-  observations:
-    "Hosting y dominio se renuevan de forma anual.",
+  observations: "Hosting y dominio se renuevan de forma anual.",
   payment: {
     payableTo: "EderCreaWebs",
     paymentMethod: "Western Union",
@@ -260,12 +286,84 @@ function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
-export function QuoteBuilder() {
+function toStoredPaymentDetails(form: QuoteFormState): StoredPaymentDetails {
+  return {
+    payment: form.payment,
+    client_reference: form.clientReference,
+    project_conditions: form.projectConditions,
+    observations: form.observations,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readStoredPaymentDetails(paymentDetails: unknown): StoredPaymentDetails {
+  if (!isRecord(paymentDetails)) {
+    return {};
+  }
+
+  const parsed: StoredPaymentDetails = {};
+
+  if (isRecord(paymentDetails.payment)) {
+    const payment = paymentDetails.payment;
+    parsed.payment = {
+      payableTo: String(payment.payableTo ?? ""),
+      paymentMethod: String(payment.paymentMethod ?? ""),
+      bank: String(payment.bank ?? ""),
+      clabe: String(payment.clabe ?? ""),
+      swift: String(payment.swift ?? ""),
+      firstName: String(payment.firstName ?? ""),
+      lastName: String(payment.lastName ?? ""),
+      secondLastName: String(payment.secondLastName ?? ""),
+      country: String(payment.country ?? ""),
+      state: String(payment.state ?? ""),
+      city: String(payment.city ?? ""),
+      location: String(payment.location ?? ""),
+    };
+  }
+
+  if (typeof paymentDetails.client_reference === "string") {
+    parsed.client_reference = paymentDetails.client_reference;
+  }
+  if (typeof paymentDetails.project_conditions === "string") {
+    parsed.project_conditions = paymentDetails.project_conditions;
+  }
+  if (typeof paymentDetails.observations === "string") {
+    parsed.observations = paymentDetails.observations;
+  }
+
+  return parsed;
+}
+
+function mapQuoteItemsToForm(items: QuoteItem[]): QuoteFormItem[] {
+  if (items.length === 0) {
+    return [createEmptyItem()];
+  }
+
+  return items.map((item) => ({
+    id: item.id,
+    item: item.description,
+    description: item.details ?? "",
+    qty: String(item.quantity),
+    price: String(item.unit_price),
+  }));
+}
+
+export function QuoteBuilder({ quoteId }: QuoteBuilderProps) {
+  const router = useRouter();
   const [form, setForm] = useState<QuoteFormState>(INITIAL_FORM_STATE);
   const [clientOptions, setClientOptions] = useState<ClientLookupOption[]>([]);
   const [loadingClients, setLoadingClients] = useState(false);
   const [clientLoadError, setClientLoadError] = useState<string | null>(null);
+  const [loadingQuote, setLoadingQuote] = useState(Boolean(quoteId));
+  const [quoteLoadError, setQuoteLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+
   const supabase = useMemo(() => createClient(), []);
+  const isEditMode = Boolean(quoteId);
 
   const previewData = buildInvoiceData(form);
   const itemTotals = form.items.map((item) => calculateItemTotal(item));
@@ -307,6 +405,71 @@ export function QuoteBuilder() {
     fetchClients();
   }, [supabase]);
 
+  useEffect(() => {
+    async function fetchQuote() {
+      if (!quoteId) {
+        setLoadingQuote(false);
+        return;
+      }
+      if (!supabase) {
+        setQuoteLoadError("Supabase no está configurado.");
+        setLoadingQuote(false);
+        return;
+      }
+
+      setLoadingQuote(true);
+      setQuoteLoadError(null);
+
+      const { data: quoteData, error: quoteError } = await supabase
+        .from("quotes")
+        .select("*")
+        .eq("id", quoteId)
+        .single();
+
+      if (quoteError || !quoteData) {
+        setQuoteLoadError(quoteError?.message || "No se encontró la cotización.");
+        setLoadingQuote(false);
+        return;
+      }
+
+      const { data: itemRows, error: itemsError } = await supabase
+        .from("quote_items")
+        .select("*")
+        .eq("quote_id", quoteId)
+        .order("sort_order", { ascending: true });
+
+      if (itemsError) {
+        setQuoteLoadError(itemsError.message);
+        setLoadingQuote(false);
+        return;
+      }
+
+      const quote = quoteData as Quote;
+      const quoteItems = (itemRows as QuoteItem[]) ?? [];
+      const storedDetails = readStoredPaymentDetails(quote.payment_details);
+
+      setForm({
+        invoiceNumber: quote.quote_number,
+        date: quote.issue_date ?? "",
+        status: quote.status,
+        clientId: quote.client_id,
+        clientName: quote.client_name ?? "",
+        clientReference: storedDetails.client_reference ?? "",
+        discountAmount: String(quote.discount_amount),
+        taxRate: String(quote.tax_rate),
+        notes: quote.notes ?? "",
+        projectConditions: storedDetails.project_conditions ?? "",
+        observations: storedDetails.observations ?? "",
+        payment: storedDetails.payment ?? INITIAL_FORM_STATE.payment,
+        items: mapQuoteItemsToForm(quoteItems),
+      });
+
+      setLoadingQuote(false);
+    }
+
+    fetchQuote();
+  }, [quoteId, supabase]);
+
   function handleFieldChange<K extends keyof QuoteFormState>(
     field: K,
     value: QuoteFormState[K]
@@ -314,6 +477,19 @@ export function QuoteBuilder() {
     setForm((currentForm) => ({
       ...currentForm,
       [field]: value,
+    }));
+  }
+
+  function handleClientNameChange(value: string) {
+    const normalizedValue = value.trim();
+    const selectedOption = clientOptions.find(
+      (client) => client.value === normalizedValue
+    );
+
+    setForm((currentForm) => ({
+      ...currentForm,
+      clientName: value,
+      clientId: selectedOption?.id ?? null,
     }));
   }
 
@@ -363,20 +539,151 @@ export function QuoteBuilder() {
     });
   }
 
+  async function handleSaveQuote() {
+    if (!supabase) {
+      setSaveNotice("Supabase no está configurado.");
+      return;
+    }
+
+    setSaving(true);
+    setSaveNotice(null);
+
+    try {
+      const quotePayload = {
+        quote_number: form.invoiceNumber.trim() || "ECW-2026-002",
+        client_id: form.clientId,
+        project_id: null,
+        client_name: form.clientName.trim() || null,
+        issue_date: form.date || null,
+        status: form.status,
+        subtotal: previewData.subtotal ?? 0,
+        discount_amount: previewData.discount ?? 0,
+        tax_rate: previewData.taxRate ?? 16,
+        tax_amount: previewData.tax ?? 0,
+        grand_total: previewData.grandTotal,
+        notes: form.notes.trim() || null,
+        payment_details: toStoredPaymentDetails(form),
+      };
+
+      let persistedQuoteId = quoteId;
+
+      if (persistedQuoteId) {
+        const { error: updateError } = await supabase
+          .from("quotes")
+          .update(quotePayload)
+          .eq("id", persistedQuoteId);
+
+        if (updateError) throw new Error(updateError.message);
+
+        const { error: deleteItemsError } = await supabase
+          .from("quote_items")
+          .delete()
+          .eq("quote_id", persistedQuoteId);
+
+        if (deleteItemsError) throw new Error(deleteItemsError.message);
+      } else {
+        const { data: inserted, error: insertError } = await supabase
+          .from("quotes")
+          .insert([quotePayload])
+          .select("id")
+          .single();
+
+        if (insertError) throw new Error(insertError.message);
+        persistedQuoteId = (inserted as { id: string }).id;
+      }
+
+      if (!persistedQuoteId) {
+        throw new Error("No se pudo obtener el id de la cotización guardada.");
+      }
+
+      const quoteItemsPayload = form.items.map((item, index) => ({
+        quote_id: persistedQuoteId,
+        description: item.item.trim() || `Item ${index + 1}`,
+        details: item.description.trim() || null,
+        quantity: roundCurrency(clampPositive(parseAmount(item.qty))),
+        unit_price: roundCurrency(clampPositive(parseAmount(item.price))),
+        total: calculateItemTotal(item),
+        sort_order: index,
+      }));
+
+      const { error: itemsInsertError } = await supabase
+        .from("quote_items")
+        .insert(quoteItemsPayload);
+
+      if (itemsInsertError) throw new Error(itemsInsertError.message);
+
+      setSaveNotice("Cotización guardada correctamente.");
+
+      if (!quoteId) {
+        router.push(`/cotizaciones/${persistedQuoteId}`);
+      }
+    } catch (err) {
+      setSaveNotice(
+        err instanceof Error
+          ? `No se pudo guardar la cotización: ${err.message}`
+          : "No se pudo guardar la cotización."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loadingQuote) {
+    return (
+      <div className="space-y-4">
+        <div className="h-10 bg-gray-100 rounded animate-pulse" />
+        <div className="h-64 bg-gray-100 rounded animate-pulse" />
+      </div>
+    );
+  }
+
+  if (quoteLoadError) {
+    return (
+      <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-4 py-3">
+        Error al cargar cotización: {quoteLoadError}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="print:hidden flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">
-            Nueva cotizacion
+            {isEditMode ? "Editar cotización" : "Nueva cotizacion"}
           </h1>
           <p className="mt-1 text-sm text-gray-500">
-            Captura datos en local y revisa una preview en tiempo real usando el
-            template actual de invoice.
+            Captura datos y guarda cotizaciones en Supabase manteniendo la preview en vivo.
           </p>
         </div>
-        <PrintButton />
+        <div className="flex items-start gap-2">
+          <Button
+            type="button"
+            onClick={handleSaveQuote}
+            disabled={saving}
+            className="shrink-0"
+          >
+            {saving
+              ? "Guardando..."
+              : isEditMode
+              ? "Guardar cambios"
+              : "Guardar borrador"}
+          </Button>
+          <PrintButton />
+        </div>
       </div>
+
+      {saveNotice && (
+        <div
+          className={`text-sm rounded-md px-4 py-3 border ${
+            saveNotice.startsWith("No se pudo")
+              ? "text-red-700 bg-red-50 border-red-200"
+              : "text-green-700 bg-green-50 border-green-200"
+          }`}
+        >
+          {saveNotice}
+        </div>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(20rem,28rem)_minmax(0,1fr)] print:block">
         <div className="space-y-5 print:hidden">
@@ -414,14 +721,33 @@ export function QuoteBuilder() {
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="quote-status">Status</Label>
+                <Select
+                  value={form.status}
+                  onValueChange={(value) =>
+                    handleFieldChange("status", value as QuoteStatus)
+                  }
+                >
+                  <SelectTrigger id="quote-status">
+                    <SelectValue>{QUOTE_STATUS_LABELS[form.status]}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ALL_QUOTE_STATUSES.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {QUOTE_STATUS_LABELS[status]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="client-name">Cliente / empresa</Label>
                 <Input
                   id="client-name"
                   list="clients-lookup-list"
                   value={form.clientName}
-                  onChange={(event) =>
-                    handleFieldChange("clientName", event.target.value)
-                  }
+                  onChange={(event) => handleClientNameChange(event.target.value)}
                   placeholder="Nombre comercial o razon social"
                 />
                 <datalist id="clients-lookup-list">

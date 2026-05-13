@@ -94,6 +94,8 @@ export type MaintenanceStatus =
   | "pending_payment"
   | "cancelled";
 
+export type QuoteStatus = "draft" | "sent" | "approved" | "rejected";
+
 // Lead
 export interface Lead {
   id: string;
@@ -250,6 +252,45 @@ export interface ClientLink {
 }
 
 export type ClientLinkInsert = Omit<ClientLink, "id" | "created_at" | "updated_at">;
+
+export interface Quote {
+  id: string;
+  quote_number: string;
+  client_id: string | null;
+  project_id: string | null;
+  client_name: string | null;
+  issue_date: string | null;
+  status: QuoteStatus;
+  subtotal: number;
+  discount_amount: number;
+  tax_rate: number;
+  tax_amount: number;
+  grand_total: number;
+  notes: string | null;
+  payment_details: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export type QuoteInsert = Omit<Quote, "id" | "created_at" | "updated_at">;
+
+export interface QuoteItem {
+  id: string;
+  quote_id: string;
+  description: string;
+  details: string | null;
+  quantity: number;
+  unit_price: number;
+  total: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type QuoteItemInsert = Omit<
+  QuoteItem,
+  "id" | "created_at" | "updated_at"
+>;
 
 // Usuario autenticado
 export interface AuthUser {

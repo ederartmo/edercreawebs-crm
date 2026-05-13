@@ -4,6 +4,7 @@ import type {
   DomainStatus,
   LeadSource,
   PaymentMethod,
+  QuoteStatus,
   ProjectType,
 } from "@/types";
 
@@ -134,6 +135,24 @@ export const ALL_PAYMENT_METHODS: PaymentMethod[] = [
   "cheque",
   "otro",
 ];
+
+export const QUOTE_STATUS_LABELS: Record<QuoteStatus, string> = {
+  draft: "Borrador",
+  sent: "Enviada",
+  approved: "Aprobada",
+  rejected: "Rechazada",
+};
+
+export const QUOTE_STATUS_COLORS: Record<QuoteStatus, string> = {
+  draft: "bg-gray-100 text-gray-800",
+  sent: "bg-blue-100 text-blue-800",
+  approved: "bg-emerald-100 text-emerald-800",
+  rejected: "bg-red-100 text-red-800",
+};
+
+export const ALL_QUOTE_STATUSES = Object.keys(
+  QUOTE_STATUS_LABELS
+) as QuoteStatus[];
 export const ALL_PROJECT_TYPES = Object.keys(
   PROJECT_TYPE_LABELS
 ) as ProjectType[];

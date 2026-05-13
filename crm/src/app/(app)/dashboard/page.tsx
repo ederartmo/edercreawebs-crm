@@ -22,6 +22,7 @@ import {
   Clock4,
   AlertOctagon,
   ExternalLink,
+  DollarSign,
 } from "lucide-react";
 
 interface ProjectDashboardRow {
@@ -77,6 +78,7 @@ interface DashboardStats {
   clientes: number;
   proyectosEnCurso: number;
   pagosPendientesMonto: number;
+  totalCobrado: number;
   cotizacionesEnviadas: number;
   esperandoAnticipo: number;
   tareasBloqueadas: number;
@@ -128,6 +130,7 @@ export default function DashboardPage() {
     clientes: 0,
     proyectosEnCurso: 0,
     pagosPendientesMonto: 0,
+    totalCobrado: 0,
     cotizacionesEnviadas: 0,
     esperandoAnticipo: 0,
     tareasBloqueadas: 0,
@@ -148,7 +151,7 @@ export default function DashboardPage() {
       setError(null);
 
       try {
-        const [leadsRes, clientsRes, projectsRes, paymentsRes, tasksRes] = await Promise.all([
+        const [leadsRes, clientsRes, projectsRes, paymentsRes, paidPaymentsRes, tasksRes] = await Promise.all([
           supabase.from("leads").select("status"),
           supabase.from("clients").select("id", { count: "exact" }),
           supabase
@@ -164,6 +167,10 @@ export default function DashboardPage() {
             .in("status", ["pending", "overdue"])
             .order("due_date", { ascending: true, nullsFirst: false }),
           supabase
+            .from("payments")
+            .select("amount")
+            .eq("status", "paid"),
+          supabase
             .from("project_tasks")
             .select("id, title, project_id, projects(id, title, clients(name, company))")
             .eq("status", "blocked"),
@@ -173,12 +180,14 @@ export default function DashboardPage() {
         if (clientsRes.error) throw new Error(clientsRes.error.message);
         if (projectsRes.error) throw new Error(projectsRes.error.message);
         if (paymentsRes.error) throw new Error(paymentsRes.error.message);
+        if (paidPaymentsRes.error) throw new Error(paidPaymentsRes.error.message);
         if (tasksRes.error) throw new Error(tasksRes.error.message);
 
         const leads = leadsRes.data ?? [];
         const allProjects = (projectsRes.data as ProjectDashboardRow[]) ?? [];
         const blocked = (tasksRes.data as BlockedTaskRow[]) ?? [];
         const pending = (paymentsRes.data as PendingPaymentRow[]) ?? [];
+        const paidPayments = paidPaymentsRes.data ?? [];
 
         const leadsActivos = leads.filter((lead) => lead.status !== "perdido").length;
         const leadsCotizacion = leads.filter(
@@ -201,6 +210,7 @@ export default function DashboardPage() {
         ).length;
 
         const pagosPendientesMonto = pending.reduce((sum, payment) => sum + payment.amount, 0);
+        const totalCobrado = paidPayments.reduce((sum, payment) => sum + (payment.amount ?? 0), 0);
 
         setProjects(allProjects);
         setPendingPayments(pending);
@@ -210,6 +220,7 @@ export default function DashboardPage() {
           clientes: clientsRes.count ?? 0,
           proyectosEnCurso,
           pagosPendientesMonto,
+          totalCobrado,
           cotizacionesEnviadas: leadsCotizacion + projectsCotizacion,
           esperandoAnticipo,
           tareasBloqueadas: blocked.length,
@@ -266,6 +277,13 @@ export default function DashboardPage() {
       icon: FolderKanban,
       description: "Sin entregados, mantenimiento o perdidos",
       href: "/proyectos",
+    },
+    {
+      label: "Total cobrado",
+      value: toCurrency(stats.totalCobrado),
+      icon: DollarSign,
+      description: "Pagos completados",
+      href: "/pagos",
     },
     {
       label: "Pagos pendientes",

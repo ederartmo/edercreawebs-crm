@@ -128,6 +128,45 @@ export default function ProyectosPage() {
 
     if (error) throw new Error(toFriendlyError(error.message));
 
+    // Crear automáticamente los 2 pagos (anticipo + segundo pago)
+    const paymentsToCreate = [];
+    if (data.deposit_amount > 0) {
+      paymentsToCreate.push({
+        project_id: created.id,
+        concept: "Anticipo (50%)",
+        amount: data.deposit_amount,
+        status: "pending" as const,
+        due_date: data.start_date || null,
+        paid_at: null,
+        payment_method: null,
+        notes: null,
+      });
+    }
+    if (data.final_payment_amount > 0) {
+      paymentsToCreate.push({
+        project_id: created.id,
+        concept: "Segundo pago (50%)",
+        amount: data.final_payment_amount,
+        status: "pending" as const,
+        due_date: data.due_date || null,
+        paid_at: null,
+        payment_method: null,
+        notes: null,
+      });
+    }
+
+    if (paymentsToCreate.length > 0) {
+      const { error: paymentsError } = await supabase
+        .from("payments")
+        .insert(paymentsToCreate);
+
+      if (paymentsError) {
+        setSavingNotice(
+          `Proyecto creado, pero no se pudieron generar los pagos: ${paymentsError.message}`
+        );
+      }
+    }
+
     await validateChecklistTrigger(created.id);
     await fetchProjects();
   }

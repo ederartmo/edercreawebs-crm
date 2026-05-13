@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { Payment, PaymentInsert, PaymentStatus } from "@/types";
+import type { Payment, PaymentInsert, PaymentStatus, PaymentMethod } from "@/types";
+import { PAYMENT_METHOD_LABELS, ALL_PAYMENT_METHODS } from "@/lib/crm-helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,6 +65,7 @@ export function ProjectPaymentsSection({
     concept: "",
     amount: "0",
     due_date: "",
+    payment_method: "",
   });
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -81,10 +83,10 @@ export function ProjectPaymentsSection({
         status: "pending",
         due_date: form.due_date || null,
         paid_at: null,
-        payment_method: null,
+        payment_method: form.payment_method || null,
         notes: null,
       });
-      setForm({ concept: "", amount: "0", due_date: "" });
+      setForm({ concept: "", amount: "0", due_date: "", payment_method: "" });
       setFormOpen(false);
     } finally {
       setSaving(false);
@@ -154,15 +156,36 @@ export function ProjectPaymentsSection({
               />
             </div>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="payment-duedate">Fecha límite</Label>
-            <Input
-              id="payment-duedate"
-              type="date"
-              value={form.due_date}
-              onChange={(e) => setForm({ ...form, due_date: e.target.value })}
-              disabled={saving}
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="payment-duedate">Fecha límite</Label>
+              <Input
+                id="payment-duedate"
+                type="date"
+                value={form.due_date}
+                onChange={(e) => setForm({ ...form, due_date: e.target.value })}
+                disabled={saving}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="payment-method">Método de pago</Label>
+              <Select
+                value={form.payment_method}
+                onValueChange={(val) => setForm({ ...form, payment_method: val })}
+                disabled={saving}
+              >
+                <SelectTrigger id="payment-method">
+                  <SelectValue placeholder="Seleccionar..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {ALL_PAYMENT_METHODS.map((method) => (
+                    <SelectItem key={method} value={method}>
+                      {PAYMENT_METHOD_LABELS[method]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <div className="flex gap-2 justify-end">
             <Button

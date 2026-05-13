@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import type { Payment, PaymentStatus } from "@/types";
+import type { Payment, PaymentStatus, PaymentMethod } from "@/types";
+import { PAYMENT_METHOD_LABELS, ALL_PAYMENT_METHODS } from "@/lib/crm-helpers";
 import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -125,6 +126,27 @@ export default function PagosPage() {
       setPayments((prev) =>
         prev.map((p) =>
           p.id === payment.id ? { ...p, status: newStatus, paid_at: paid_at ?? null } : p
+        )
+      );
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  async function handleUpdatePaymentMethod(paymentId: string, newMethod: PaymentMethod | "") {
+    if (!supabase) return;
+    setUpdatingId(paymentId);
+    try {
+      const { error } = await supabase
+        .from("payments")
+        .update({ payment_method: newMethod || null })
+        .eq("id", paymentId);
+
+      if (error) throw new Error(error.message);
+
+      setPayments((prev) =>
+        prev.map((p) =>
+          p.id === paymentId ? { ...p, payment_method: newMethod || null } : p
         )
       );
     } finally {
@@ -318,7 +340,29 @@ export default function PagosPage() {
 
                       {/* Método */}
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                        {payment.payment_method ?? "-"}
+                        <Select
+                          value={payment.payment_method || ""}
+                          onValueChange={(val) =>
+                            handleUpdatePaymentMethod(payment.id, val as PaymentMethod | "")
+                          }
+                          disabled={updatingId === payment.id || deletingId === payment.id}
+                        >
+                          <SelectTrigger className="h-7 w-auto border-0 p-0 shadow-none focus:ring-0 text-xs">
+                            <SelectValue>
+                              {payment.payment_method
+                                ? PAYMENT_METHOD_LABELS[payment.payment_method as PaymentMethod]
+                                : "Sin método"}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">Sin método</SelectItem>
+                            {ALL_PAYMENT_METHODS.map((method) => (
+                              <SelectItem key={method} value={method}>
+                                {PAYMENT_METHOD_LABELS[method]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </td>
 
                       {/* Acciones */}

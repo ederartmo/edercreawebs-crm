@@ -18,6 +18,7 @@ export default function ClientesPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [loadingClients, setLoadingClients] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
@@ -76,10 +77,19 @@ export default function ClientesPage() {
     if (!supabase) return;
     if (!confirm("¿Eliminar este cliente? Esta acción no se puede deshacer."))
       return;
+    setDeleteError(null);
     setDeletingId(id);
     const { error } = await supabase.from("clients").delete().eq("id", id);
     if (!error) {
       setClients((prev) => prev.filter((c) => c.id !== id));
+    } else {
+      if (error.code === "23503") {
+        setDeleteError(
+          "No se puede eliminar este cliente porque tiene proyectos relacionados. Elimina o reasigna esos proyectos primero."
+        );
+      } else {
+        setDeleteError(error.message);
+      }
     }
     setDeletingId(null);
   }
@@ -184,6 +194,12 @@ export default function ClientesPage() {
       {fetchError && (
         <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-4 py-3">
           Error al cargar clientes: {fetchError}
+        </div>
+      )}
+
+      {deleteError && (
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-4 py-3">
+          {deleteError}
         </div>
       )}
 

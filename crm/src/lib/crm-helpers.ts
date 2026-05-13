@@ -3,6 +3,7 @@ import type {
   CrmStatus,
   DomainStatus,
   LeadSource,
+  PaymentMethod,
   ProjectType,
 } from "@/types";
 
@@ -90,7 +91,23 @@ export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   automatizacion: "Automatización",
   mantenimiento: "Mantenimiento",
 };
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  transferencia_bancaria: "Transferencia bancaria",
+  efectivo: "Efectivo",
+  tarjeta_credito: "Tarjeta crédito",
+  tarjeta_debito: "Tarjeta débito",
+  cheque: "Cheque",
+  otro: "Otro",
+};
 
+export const ALL_PAYMENT_METHODS: PaymentMethod[] = [
+  "transferencia_bancaria",
+  "efectivo",
+  "tarjeta_credito",
+  "tarjeta_debito",
+  "cheque",
+  "otro",
+];
 export const ALL_PROJECT_TYPES = Object.keys(
   PROJECT_TYPE_LABELS
 ) as ProjectType[];

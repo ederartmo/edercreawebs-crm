@@ -50,6 +50,15 @@ export type TaskStatus = "pending" | "in_progress" | "done" | "blocked";
 // Estados de pagos
 export type PaymentStatus = "pending" | "paid" | "overdue" | "cancelled";
 
+// Métodos de pago
+export type PaymentMethod =
+  | "transferencia_bancaria"
+  | "efectivo"
+  | "tarjeta_credito"
+  | "tarjeta_debito"
+  | "cheque"
+  | "otro";
+
 // Estados de dominio
 export type DomainStatus = "pendiente" | "confirmado" | "comprado" | "conectado";
 

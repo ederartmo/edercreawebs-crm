@@ -1,11 +1,13 @@
-# Eder CRM — Starter V1
+﻿# Eder CRM - Starter V1
+
+CRM (MVP) para EderCreaWebs.
 
 Panel inicial para el CRM comercial conectado al esquema de Supabase creado previamente.
 
 ## Incluye
 
 - Login con Supabase Auth.
-- Protección de rutas con `@supabase/ssr`.
+- Proteccion de rutas con `@supabase/ssr`.
 - Vista Hoy.
 - Pipeline.
 - Conversaciones.
@@ -23,7 +25,7 @@ Panel inicial para el CRM comercial conectado al esquema de Supabase creado prev
 - Fila de `crm_settings` creada para ese usuario.
 - Patch SQL `supabase_patch_after_schema_v1.sql` ejecutado.
 
-## Instalación
+## Instalacion
 
 ```bash
 npm install
@@ -39,7 +41,7 @@ http://localhost:3000
 
 ## Variables
 
-En Supabase abre **Project Settings / API** o el diálogo **Connect** y copia:
+En Supabase abre **Project Settings / API** o el dialogo **Connect** y copia:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=
@@ -50,4 +52,4 @@ No pongas una secret key en variables `NEXT_PUBLIC_*`.
 
 ## Nota
 
-El panel mostrará estados vacíos hasta que importemos o creemos leads. El siguiente paso es crear el importador de los chats ZIP y después conectar WhatsApp.
+El panel mostrara estados vacios hasta que importemos o creemos leads. El siguiente paso es crear el importador de los chats ZIP y despues conectar WhatsApp.

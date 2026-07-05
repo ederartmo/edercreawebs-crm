@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { createClient } from "@/lib/supabase/server";
 import { formatDate, formatMoney, humanizeStatus } from "@/lib/format";
 import { notFound } from "next/navigation";
+import { AnalyzeLeadButton } from "./analyze-lead-button";
 
 type LatestAnalysisInput = {
   messageCount: number | null;
@@ -125,7 +126,7 @@ export default async function LeadDetailPage({
       .from("automation_runs")
       .select("finished_at,input,output")
       .eq("lead_id", id)
-      .eq("workflow_name", "whatsapp_import_analysis_v1")
+      .in("workflow_name", ["whatsapp_import_analysis_v1", "lead_full_analysis_v1"])
       .eq("status", "completed")
       .order("finished_at", { ascending: false })
       .limit(1),
@@ -207,7 +208,10 @@ export default async function LeadDetailPage({
           </article>
 
           <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <h2 className="font-bold">Último análisis del expediente</h2>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <h2 className="font-bold">Último análisis del expediente</h2>
+              <AnalyzeLeadButton leadId={id} />
+            </div>
             {latestAnalysisRun ? (
               <div className="mt-4 space-y-4 text-sm">
                 <p className="text-xs text-gray-500">

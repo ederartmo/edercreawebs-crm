@@ -55,11 +55,7 @@ Final validation results (post-fixes):
 - Build: `npm run build` completed successfully (Next.js webpack build compiled and optimized).
 
 - Git working tree (short):
-  M next-env.d.ts
-  M next.config.ts
-  M package.json
-  ?? WEB_STATUS_FOR_CHATGPT.md
-  ?? roadmap_oficial_v2_eder_crm.md
+-  clean (no changes)
 
 Notes:
 - The three lint warnings were removed by deleting truly unused variables (no comments added).

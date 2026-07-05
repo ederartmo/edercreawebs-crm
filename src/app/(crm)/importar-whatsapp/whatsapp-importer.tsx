@@ -74,12 +74,56 @@ function mimeFromFilename(filename: string) {
   return map[extension ?? ""] ?? "application/octet-stream";
 }
 
+function mediaBasename(filename: string) {
+  return filename.split(/[/\\]/).pop() ?? filename;
+}
+
+type MediaRecordMatch<T> = {
+  value: T | null;
+  matchedKey: string | null;
+  isAmbiguous: boolean;
+};
+
 function chunk<T>(items: T[], size: number) {
   const result: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
     result.push(items.slice(index, index + size));
   }
   return result;
+}
+
+function getMediaRecord<T>(records: Record<string, T>, filename: string | null | undefined) {
+  if (!filename) {
+    return { value: null, matchedKey: null, isAmbiguous: false } as MediaRecordMatch<T>;
+  }
+
+  const normalized = filename.toLowerCase();
+  if (normalized in records) {
+    return {
+      value: records[normalized],
+      matchedKey: normalized,
+      isAmbiguous: false,
+    } as MediaRecordMatch<T>;
+  }
+
+  const basename = mediaBasename(normalized);
+  const fallbackKeys = Object.keys(records).filter(
+    (key) => mediaBasename(key.toLowerCase()) === basename,
+  );
+
+  if (fallbackKeys.length === 1) {
+    return {
+      value: records[fallbackKeys[0]],
+      matchedKey: fallbackKeys[0],
+      isAmbiguous: false,
+    } as MediaRecordMatch<T>;
+  }
+
+  if (fallbackKeys.length > 1) {
+    return { value: null, matchedKey: null, isAmbiguous: true } as MediaRecordMatch<T>;
+  }
+
+  return { value: null, matchedKey: null, isAmbiguous: false } as MediaRecordMatch<T>;
 }
 
 
@@ -255,6 +299,72 @@ function parsedWithTranscriptions(
         body: `${message.body}\n\n[Transcripción de nota de voz]\n${transcription}`,
       };
     }),
+  };
+}
+
+type AttachmentMessageRef = {
+  messageIndex: number;
+  providerMessageId: string;
+};
+
+type PersistedAssetRelation = {
+  entryName: string;
+  filename: string;
+  category: string;
+  messageIndex: number | null;
+  providerMessageId: string | null;
+  messageId: string | null;
+  assetId: string | null;
+  transcriptionStored: boolean;
+  extractedTextStored: boolean;
+};
+
+function buildAttachmentMessageQueues(
+  parsed: ParsedWhatsAppExport,
+  conversationId: string,
+  mediaEntryNames: string[],
+) {
+  const normalizedEntryNames = mediaEntryNames.map((entryName) => entryName.toLowerCase());
+  const basenameCounts = new Map<string, number>();
+  for (const entryName of mediaEntryNames) {
+    const basename = mediaBasename(entryName).toLowerCase();
+    basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
+  }
+
+  const ambiguousBasenames = new Set(
+    Array.from(basenameCounts.entries())
+      .filter(([, count]) => count > 1)
+      .map(([basename]) => basename),
+  );
+
+  const queues = new Map<string, AttachmentMessageRef[]>();
+
+  for (const message of parsed.messages) {
+    if (!message.attachmentFilename) continue;
+
+    const normalizedAttachment = message.attachmentFilename.toLowerCase();
+    const exactEntryName = normalizedEntryNames.find(
+      (entryName) => entryName === normalizedAttachment,
+    );
+    const basenameMatches = Array.from(basenameCounts.keys()).filter(
+      (basename) => normalizedAttachment.endsWith(basename),
+    );
+    const key =
+      exactEntryName ??
+      (basenameMatches.length === 1 ? basenameMatches[0] : normalizedAttachment);
+    if (!exactEntryName && ambiguousBasenames.has(key)) continue;
+
+    const current = queues.get(key) ?? [];
+    current.push({
+      messageIndex: message.index,
+      providerMessageId: `whatsapp-import:${conversationId}:${message.index}`,
+    });
+    queues.set(key, current);
+  }
+
+  return {
+    queues,
+    ambiguousBasenames,
   };
 }
 
@@ -956,6 +1066,7 @@ export function WhatsAppImporter() {
       return;
     }
 
+    const importStartedAt = new Date().toISOString();
     setImporting(true);
     const importWarnings: string[] = [];
 
@@ -1163,6 +1274,10 @@ export function WhatsAppImporter() {
           !message.isSystem &&
           message.sender?.trim().toLowerCase() === ownerAlias.trim().toLowerCase();
         const providerMessageId = `whatsapp-import:${conversation.id}:${message.index}`;
+        const transcriptionMatch = getMediaRecord(
+          audioTranscriptions,
+          message.attachmentFilename,
+        );
 
         return {
           owner_id: user.id,
@@ -1176,17 +1291,11 @@ export function WhatsAppImporter() {
           sender_name: message.sender,
           sender_phone: outbound ? null : phone.trim(),
           body: message.body,
-          transcription: message.attachmentFilename
-            ? audioTranscriptions[
-                message.attachmentFilename.toLowerCase()
-              ] ?? null
-            : null,
+          transcription: transcriptionMatch.value,
           processed_text: message.attachmentFilename &&
-            audioTranscriptions[message.attachmentFilename.toLowerCase()]
+            transcriptionMatch.value
               ? `${message.body}\n\n[Transcripción de nota de voz]\n${
-                  audioTranscriptions[
-                    message.attachmentFilename.toLowerCase()
-                  ]
+                  transcriptionMatch.value
                 }`
               : message.body,
           raw_payload: {
@@ -1220,13 +1329,49 @@ export function WhatsAppImporter() {
           !entry.name.startsWith("__MACOSX/") &&
           entry.name !== chatFilename,
       );
+      const attachmentMessageQueues = buildAttachmentMessageQueues(
+        parsed,
+        conversation.id,
+        entries.map((entry) => entry.name),
+      );
+      const assetRelations: PersistedAssetRelation[] = [];
+      const relationWarnings = new Set<string>();
+
+      function addAmbiguousRelationWarning(filename: string) {
+        const warning = `No se relacionó "${mediaBasename(filename)}" con un mensaje o asset porque existen varios archivos con el mismo nombre.`;
+        if (relationWarnings.has(warning)) return;
+        relationWarnings.add(warning);
+        importWarnings.push(warning);
+      }
+
+      for (const message of parsed.messages) {
+        const transcriptionMatch = getMediaRecord(
+          audioTranscriptions,
+          message.attachmentFilename,
+        );
+        if (transcriptionMatch.isAmbiguous && message.attachmentFilename) {
+          addAmbiguousRelationWarning(message.attachmentFilename);
+        }
+      }
 
       for (let index = 0; index < entries.length; index += 1) {
         const entry = entries[index];
         setProgress(`Subiendo archivo ${index + 1} de ${entries.length}: ${entry.name}`);
 
         try {
-          const originalName = entry.name.split("/").pop() ?? entry.name;
+          const originalName = mediaBasename(entry.name);
+          const entryNameKey = entry.name.toLowerCase();
+          const originalNameKey = originalName.toLowerCase();
+          const matchedAttachment =
+            attachmentMessageQueues.queues.get(entryNameKey)?.shift() ??
+            attachmentMessageQueues.queues.get(originalNameKey)?.shift() ??
+            null;
+          if (
+            !matchedAttachment &&
+            attachmentMessageQueues.ambiguousBasenames.has(originalNameKey)
+          ) {
+            addAmbiguousRelationWarning(originalName);
+          }
           const sanitized = safeFilename(originalName) || `archivo-${index + 1}`;
           const storagePath = `${user.id}/${lead.id}/${Date.now()}-${index}-${sanitized}`;
           const blob = await entry.async("blob");
@@ -1240,16 +1385,24 @@ export function WhatsAppImporter() {
             });
           if (uploadError) throw uploadError;
 
-          const matchedMessage = parsed.messages.find(
-            (message) =>
-              message.attachmentFilename?.toLowerCase() === originalName.toLowerCase(),
-          );
-          const matchedProviderId = matchedMessage
-            ? `whatsapp-import:${conversation.id}:${matchedMessage.index}`
+          const matchedProviderId = matchedAttachment?.providerMessageId ?? null;
+          const matchedMessage = matchedAttachment
+            ? parsed.messages.find(
+                (message) => message.index === matchedAttachment.messageIndex,
+              ) ?? null
             : null;
 
-          const imageAnalysis = imageAnalyses[originalName.toLowerCase()] ?? null;
-          const pdfAnalysis = pdfAnalyses[originalName.toLowerCase()] ?? null;
+          const imageAnalysisMatch = getMediaRecord(imageAnalyses, entry.name);
+          const pdfAnalysisMatch = getMediaRecord(pdfAnalyses, entry.name);
+          const audioTranscriptionMatch = getMediaRecord(audioTranscriptions, entry.name);
+          const imageAnalysis = imageAnalysisMatch.value;
+          const pdfAnalysis = pdfAnalysisMatch.value;
+          const audioTranscription = audioTranscriptionMatch.value;
+          const extractedText =
+            imageAnalysis?.detected_text ||
+            pdfAnalysis?.detected_text ||
+            pdfAnalysis?.summary ||
+            null;
 
           const { data: createdAsset, error: assetError } = await supabase
             .from("assets")
@@ -1266,18 +1419,11 @@ export function WhatsAppImporter() {
               size_bytes: blob.size,
               storage_bucket: "whatsapp-imports",
               storage_path: storagePath,
-              extracted_text:
-                imageAnalysis?.detected_text ||
-                pdfAnalysis?.detected_text ||
-                pdfAnalysis?.summary ||
-                null,
-              transcription:
-                audioTranscriptions[originalName.toLowerCase()] ?? null,
+              extracted_text: extractedText,
+              transcription: audioTranscription,
               metadata: {
                 zip_filename: zipFile.name,
-                transcribed: Boolean(
-                  audioTranscriptions[originalName.toLowerCase()],
-                ),
+                transcribed: Boolean(audioTranscription),
                 image_analysis: imageAnalysis,
                 pdf_analysis: pdfAnalysis,
               },
@@ -1285,6 +1431,20 @@ export function WhatsAppImporter() {
             .select("id")
             .single();
           if (assetError) throw assetError;
+
+          assetRelations.push({
+            entryName: entry.name,
+            filename: originalName,
+            category: inferMessageType(originalName, ""),
+            messageIndex: matchedAttachment?.messageIndex ?? null,
+            providerMessageId: matchedProviderId,
+            messageId: matchedProviderId
+              ? messageIdByProvider.get(matchedProviderId) ?? null
+              : null,
+            assetId: createdAsset?.id ?? null,
+            transcriptionStored: Boolean(audioTranscription),
+            extractedTextStored: Boolean(extractedText),
+          });
 
           if (
             imageAnalysis?.is_payment_proof &&
@@ -1374,6 +1534,253 @@ export function WhatsAppImporter() {
           notes: "Fecha y hora detectadas automáticamente desde el chat importado. Revisar antes de confirmar.",
         });
         if (meetingError) importWarnings.push(`Reunión: ${meetingError.message}`);
+      }
+
+      setProgress("Guardando historial analítico…");
+
+      const assetRelationByProviderMessageId = new Map<string, PersistedAssetRelation[]>();
+      const assetRelationByMessageIndex = new Map<number, PersistedAssetRelation[]>();
+      const assetRelationByEntryName = new Map<string, PersistedAssetRelation[]>();
+      const assetRelationByFilename = new Map<string, PersistedAssetRelation[]>();
+
+      for (const relation of assetRelations) {
+        if (relation.providerMessageId) {
+          const current =
+            assetRelationByProviderMessageId.get(relation.providerMessageId) ?? [];
+          current.push(relation);
+          assetRelationByProviderMessageId.set(relation.providerMessageId, current);
+        }
+
+        if (relation.messageIndex !== null) {
+          const current =
+            assetRelationByMessageIndex.get(relation.messageIndex) ?? [];
+          current.push(relation);
+          assetRelationByMessageIndex.set(relation.messageIndex, current);
+        }
+
+        const entryNameKey = relation.entryName.toLowerCase();
+        const entryNameCurrent = assetRelationByEntryName.get(entryNameKey) ?? [];
+        entryNameCurrent.push(relation);
+        assetRelationByEntryName.set(entryNameKey, entryNameCurrent);
+
+        const filenameKey = relation.filename.toLowerCase();
+        const filenameCurrent = assetRelationByFilename.get(filenameKey) ?? [];
+        filenameCurrent.push(relation);
+        assetRelationByFilename.set(filenameKey, filenameCurrent);
+      }
+
+      function findAssetRelation(args: {
+        providerMessageId?: string | null;
+        messageIndex?: number | null;
+        filename?: string | null;
+      }) {
+        if (args.providerMessageId) {
+          const direct = assetRelationByProviderMessageId.get(args.providerMessageId) ?? [];
+          if (direct.length === 1) return direct[0];
+          if (direct.length > 1) {
+            if (args.filename) addAmbiguousRelationWarning(args.filename);
+            return null;
+          }
+        }
+
+        if (args.messageIndex !== null && args.messageIndex !== undefined) {
+          const byMessageIndex =
+            assetRelationByMessageIndex.get(args.messageIndex) ?? [];
+          if (byMessageIndex.length === 1) return byMessageIndex[0];
+          if (byMessageIndex.length > 1) {
+            if (args.filename) addAmbiguousRelationWarning(args.filename);
+            return null;
+          }
+        }
+
+        if (args.filename) {
+          const normalized = args.filename.toLowerCase();
+          const direct = assetRelationByEntryName.get(normalized) ?? [];
+          if (direct.length === 1) return direct[0];
+
+          const basenameCandidates =
+            assetRelationByFilename.get(mediaBasename(normalized)) ?? [];
+          if (basenameCandidates.length === 1) return basenameCandidates[0];
+          if (basenameCandidates.length > 1) {
+            addAmbiguousRelationWarning(args.filename);
+            return null;
+          }
+        }
+
+        return null;
+      }
+
+      const audioTranscriptionOutput = assetRelations
+        .filter(
+          (relation) =>
+            relation.category === "audio" && relation.transcriptionStored,
+        )
+        .map((relation) => ({
+          provider_message_id: relation.providerMessageId,
+          message_id: relation.messageId,
+          asset_id: relation.assetId,
+          filename: relation.filename,
+          message_index: relation.messageIndex,
+          stored_in_message_transcription: true,
+          stored_in_asset_transcription: true,
+        }));
+
+      const imageAnalysisOutput = Object.entries(imageAnalyses).map(
+        ([mediaKey, analysis]) => {
+          const relation = findAssetRelation({ filename: mediaKey });
+          return {
+            provider_message_id: relation?.providerMessageId ?? null,
+            message_id: relation?.messageId ?? null,
+            asset_id: relation?.assetId ?? null,
+            filename: relation?.filename ?? mediaBasename(mediaKey),
+            message_index: relation?.messageIndex ?? null,
+            kind: analysis.kind,
+            summary: analysis.summary,
+            business_name: analysis.business_name,
+            is_payment_proof: analysis.is_payment_proof,
+            amount: analysis.amount,
+            currency: analysis.currency,
+            bank_name: analysis.bank_name,
+            beneficiary: analysis.beneficiary,
+            reference: analysis.reference,
+            confidence: analysis.confidence,
+            stored_in_asset_extracted_text: relation?.extractedTextStored ?? false,
+          };
+        },
+      );
+
+      const pdfAnalysisOutput = Object.entries(pdfAnalyses).map(
+        ([mediaKey, analysis]) => {
+          const relation = findAssetRelation({ filename: mediaKey });
+          return {
+            provider_message_id: relation?.providerMessageId ?? null,
+            message_id: relation?.messageId ?? null,
+            asset_id: relation?.assetId ?? null,
+            filename: relation?.filename ?? mediaBasename(mediaKey),
+            message_index: relation?.messageIndex ?? null,
+            document_type: analysis.document_type,
+            document_role: analysis.document_role,
+            title: analysis.title,
+            summary: analysis.summary,
+            business_name: analysis.business_name,
+            industry: analysis.industry,
+            what_sells: analysis.what_sells,
+            provider_deliverables: analysis.provider_deliverables,
+            services: analysis.services,
+            products: analysis.products,
+            locations: analysis.locations,
+            website: analysis.website,
+            years_experience: analysis.years_experience,
+            certifications: analysis.certifications,
+            clients_or_projects: analysis.clients_or_projects,
+            key_facts: analysis.key_facts,
+            confidence: analysis.confidence,
+            stored_in_asset_extracted_text: relation?.extractedTextStored ?? false,
+          };
+        },
+      );
+
+      const postPaymentProofs = importPostPayment.paymentProofs.map((proof) => {
+        const relation = findAssetRelation({
+          messageIndex: proof.messageIndex,
+          filename: proof.filename,
+        });
+        return {
+          provider_message_id: relation?.providerMessageId ?? null,
+          message_id: relation?.messageId ?? null,
+          asset_id: relation?.assetId ?? null,
+          filename: relation?.filename ?? proof.filename,
+          message_index: proof.messageIndex,
+          amount: proof.amount,
+          currency: proof.currency,
+          bank_name: proof.bankName,
+          beneficiary: proof.beneficiary,
+          reference: proof.reference,
+          confidence: proof.confidence,
+        };
+      });
+
+      const finishedAt = new Date().toISOString();
+      const { error: analysisRunError } = await supabase
+        .from("automation_runs")
+        .insert({
+          owner_id: user.id,
+          lead_id: lead.id,
+          workflow_name: "whatsapp_import_analysis_v1",
+          external_execution_id: `whatsapp_import_analysis_v1:${lead.id}`,
+          status: "completed",
+          input: {
+            schema_version: "whatsapp_import_analysis_v1",
+            source: "whatsapp_zip_import",
+            chat_filename: chatFilename,
+            message_count: parsed.messages.length,
+            media_count: mediaNames.length,
+            audio_count: audioNames.length,
+            image_count: imageNames.length,
+            pdf_count: pdfNames.length,
+          },
+          output: {
+            schema_version: "whatsapp_import_analysis_v1",
+            import_inference: inference
+              ? {
+                  business_name: inference.businessName,
+                  status: inference.status,
+                  project_type: inference.projectType,
+                  confidence: inference.confidence,
+                  reasons: inference.reasons,
+                }
+              : null,
+            commercial_analysis: commercialAnalysis
+              ? {
+                  what_sells: commercialAnalysis.whatSells,
+                  how_sells: commercialAnalysis.howSells,
+                  currently_selling: commercialAnalysis.currentlySelling,
+                  runs_ads: commercialAnalysis.runsAds,
+                  ad_platforms: commercialAnalysis.adPlatforms,
+                  ad_destination: commercialAnalysis.adDestination,
+                  main_problem: commercialAnalysis.mainProblem,
+                  main_goal: commercialAnalysis.mainGoal,
+                  requested_features: commercialAnalysis.requestedFeatures,
+                  lead_score: commercialAnalysis.leadScore,
+                  intention_level: commercialAnalysis.intentionLevel,
+                  suggested_price: commercialAnalysis.suggestedPrice,
+                  currency: commercialAnalysis.currency,
+                  summary: commercialAnalysis.summary,
+                  confidence: commercialAnalysis.confidence,
+                  reasons: commercialAnalysis.reasons,
+                }
+              : null,
+            audio_transcriptions: audioTranscriptionOutput,
+            image_analyses: imageAnalysisOutput,
+            pdf_analyses: pdfAnalysisOutput,
+            post_payment_inference: {
+              has_payment_proof: importPostPayment.hasPaymentProof,
+              payment_confirmed: importPostPayment.paymentConfirmed,
+              deposit_amount: importPostPayment.depositAmount,
+              currency: importPostPayment.currency,
+              estimated_balance: importPostPayment.estimatedBalance,
+              onboarding_date: importPostPayment.onboardingDate,
+              onboarding_has_exact_time: importPostPayment.onboardingHasExactTime,
+              meeting_url: importPostPayment.meetingUrl,
+              recommended_status: importPostPayment.recommendedStatus,
+              payment_proofs: postPaymentProofs,
+              task_suggestions: importPostPayment.taskSuggestions,
+              reasons: importPostPayment.reasons,
+            },
+          },
+          error: null,
+          started_at: importStartedAt,
+          finished_at: finishedAt,
+        });
+
+      if (analysisRunError) {
+        console.error(
+          "Failed to persist WhatsApp import analysis run",
+          analysisRunError,
+        );
+        importWarnings.push(
+          `El lead se importó, pero no se pudo guardar el historial analítico: ${analysisRunError.message}`,
+        );
       }
 
       setWarnings(importWarnings);

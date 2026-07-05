@@ -1,5 +1,20 @@
-# Eder CRMEste repositorio es la fuente canónica del CRM de EderCreaWebs. Todo desarrollo, migración, despliegue y corrección deberá realizarse aquí mediante ramas y pull requests.No se deben copiar parches entre carpetas ni mantener versiones paralelas del proyecto.## Documentación- [Roadmap V2](docs/roadmap-v2.md)- [Estado actual del proyecto](docs/project-status.md)---
+# Eder CRMEste repositorio es la fuente canónica del CRM de EderCreaWebs. Todo desarrollo, migración, despliegue y corrección deberá realizarse aquí mediante ramas y pull requests.No se deben copiar parches entre carpetas ni mantener versiones paralelas del proyecto.
 
+## Documentación
+- [Roadmap V2](docs/roadmap-v2.md)
+- [Estado actual del proyecto](docs/project-status.md)
+
+---
+
+## Estado actual del starter
+
+## Documentación
+- [Roadmap V2](docs/roadmap-v2.md)
+- [Estado actual del proyecto](docs/project-status.md)
+
+---
+
+## Estado actual del starter
 ## Estado actual del starter
 
 CRM (MVP) para EderCreaWebs.

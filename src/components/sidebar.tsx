@@ -5,7 +5,6 @@ import {
   LayoutDashboard,
   LogOut,
   MessageSquareText,
-  Settings,
   Users,
 } from "lucide-react";
 import Link from "next/link";

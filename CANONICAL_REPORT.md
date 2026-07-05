@@ -32,3 +32,38 @@ Next minimal actions performed in this task:
 - Added checklist to plan.md for the TODO.
 
 Report generated automatically. Review and approve the README wording or request edits before committing upstream.
+
+---
+
+Final validation results (post-fixes):
+
+- .gitignore contains `.env.local`: confirmed.
+- `git check-ignore .env.local` output: `.env.local` (ignored).
+- `git ls-files .env.local`: not tracked (safe).
+
+- Files that contain secret-like variable names (filenames only, do NOT display values):
+  - CANONICAL_REPORT.md
+  - README.md
+  - src/app/api/analyze-image/route.ts
+  - src/app/api/analyze-pdf/route.ts
+  - src/app/api/transcribe/route.ts
+  - src/lib/supabase/client.ts
+  - src/lib/supabase/proxy.ts
+  - src/lib/supabase/server.ts
+
+- Lint: `npm run lint` produced no warnings after removing unused variables.
+- Build: `npm run build` completed successfully (Next.js webpack build compiled and optimized).
+
+- Git working tree (short):
+  M next-env.d.ts
+  M next.config.ts
+  M package.json
+  ?? WEB_STATUS_FOR_CHATGPT.md
+  ?? roadmap_oficial_v2_eder_crm.md
+
+Notes:
+- The three lint warnings were removed by deleting truly unused variables (no comments added).
+- SQL patches and extra READMEs were identified but not moved per instructions.
+- No secrets were printed; only filenames that may contain secret-like variable names are listed for review.
+
+Signed.

@@ -678,9 +678,6 @@ export function WhatsAppImporter() {
       }
     }
 
-    const paymentProofs = analyses.filter(
-      (item) => item.is_payment_proof && (item.amount ?? 0) > 0,
-    );
 
     if (parsed) {
       const price = suggestedPrice ? Number(suggestedPrice) : null;

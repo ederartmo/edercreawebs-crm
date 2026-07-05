@@ -1,6 +1,4 @@
-# CANONICAL: Eder CRM (This repository)
-
-This repository is declared the canonical project for Eder CRM (EderCreaWebs). Use this tree as the single source of truth for development, deployments and releases. Do not copy patches between folders: consolidate here and open PRs to update.
+# Eder CRMEste repositorio es la fuente canónica del CRM de EderCreaWebs. Todo desarrollo, migración, despliegue y corrección deberá realizarse aquí mediante ramas y pull requests.No se deben copiar parches entre carpetas ni mantener versiones paralelas del proyecto.
 
 ---
 

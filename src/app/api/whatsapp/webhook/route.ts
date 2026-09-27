@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { notifyAdminOfWhatsAppHandoff } from "@/lib/whatsapp/admin-alert";
 import {
   isWhatsAppSendConfigured,
   sendWhatsAppText,
@@ -538,6 +539,11 @@ async function processIncomingMessage(message: IncomingTextMessage) {
       leadId: lead.id,
       to: message.from,
       body: HANDOFF_REPLY,
+    });
+    await notifyAdminOfWhatsAppHandoff({
+      leadId: lead.id,
+      leadPhone: message.from,
+      leadName: message.senderName,
     });
     return { duplicate: false, replied: true, handoff: true, ignored: false };
   }

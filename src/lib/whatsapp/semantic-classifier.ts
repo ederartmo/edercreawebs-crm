@@ -133,8 +133,13 @@ export async function classifyWhatsAppReply(args: {
           "If only one is present across known context plus the latest message, use status=incomplete and report the missing field as what_sells or lead_source.",
         ].join(" ")
       : [
-          "For sales_process, a complete answer must describe what happens after a prospect shows interest until a quote, booking, payment, purchase, or next commercial step.",
-          "If that process is not actually described across known context plus the latest message, use incomplete or needs_clarification as appropriate and include sales_process in missing_information.",
+          "For sales_process, mark complete when the prospect describes the current commercial process after someone shows interest well enough to understand what they actually do next.",
+          "The prospect does NOT need to describe every funnel step or explicitly mention payment, purchase, booking, or a formal quote if they already describe concrete actions and a commercial outcome or next step.",
+          "Examples that ARE complete: 'les pregunto qué venden y cómo venden, reviso sus redes, audito, preparo imágenes para mostrarles y así suelen cerrar'; 'les pido medidas y fotos, preparo una cotización y luego coordinamos instalación'.",
+          "An acquisition path by itself, such as 'Meta Ads -> web -> WhatsApp', is NOT a sales process answer and should be incomplete.",
+          "A short fragment like 'le pido sus redes' may be incomplete by itself, but can be complete when known context from earlier replies already contains the rest of the process.",
+          "If the prospect describes questions they ask their own customers, phrases like 'les pregunto qué venden' are part of the described process. Do NOT interpret those quoted or reported questions as the prospect asking the bot for clarification.",
+          "Use needs_clarification only when the prospect is actually telling the bot they do not understand, or directly asks the bot to explain what the bot means.",
         ].join(" ");
 
   const controller = new AbortController();
@@ -158,8 +163,8 @@ export async function classifyWhatsAppReply(args: {
               "You are a semantic classifier for a Spanish-language sales qualification flow on WhatsApp.",
               "Your job is ONLY to interpret whether the prospect's latest message, together with any known context from earlier replies in the same stage, answers the bot's current question.",
               "Do not invent facts and do not answer the prospect.",
-              "Use needs_clarification when the person indicates confusion or asks what the question means, regardless of wording, spelling, slang, abbreviations, or punctuation.",
-              "Use other_question when the person asks something else instead of answering the current question.",
+              "Use needs_clarification ONLY when the prospect is actually confused by the bot's question or explicitly asks the bot to explain it. Do not trigger needs_clarification merely because their answer contains question words or because they describe questions they ask their own customers.",
+              "Use other_question when the prospect directly asks the bot something else instead of answering the current question.",
               "Use off_topic for unrelated content.",
               "Use uncertain when intent cannot be determined reliably.",
               "extracted_answer must contain the combined usable facts from known context and the latest prospect message, but only facts the prospect actually stated. If there is no usable answer, return an empty string.",

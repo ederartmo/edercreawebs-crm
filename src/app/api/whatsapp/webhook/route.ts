@@ -42,6 +42,7 @@ type IncomingTextMessage = {
   senderName: string | null;
   body: string;
   receivedAt: string;
+  phoneNumberId: string | null;
   rawMessage: unknown;
 };
 
@@ -90,6 +91,9 @@ function extractIncomingTextMessages(payload: unknown): IncomingTextMessage[] {
       const value = asRecord(change?.value);
       if (!value) continue;
 
+      const metadata = asRecord(value.metadata);
+      const phoneNumberId = asString(metadata?.phone_number_id) || null;
+
       const contactNames = new Map<string, string>();
       for (const contactValue of asArray(value.contacts)) {
         const contact = asRecord(contactValue);
@@ -117,6 +121,7 @@ function extractIncomingTextMessages(payload: unknown): IncomingTextMessage[] {
           senderName: contactNames.get(from) ?? null,
           body,
           receivedAt: timestampToIso(message.timestamp),
+          phoneNumberId,
           rawMessage: message,
         });
       }
@@ -297,19 +302,52 @@ async function finishWhatsAppV1Handoff(args: {
   conversationId: string;
 }) {
   const supabase = createAdminClient();
-  const { data: inboundMessages, error: inboundError } = await supabase
+  const { data: timeline, error: timelineError } = await supabase
     .from("messages")
-    .select("body,created_at")
+    .select("body,direction,created_at")
     .eq("conversation_id", args.conversationId)
-    .eq("direction", "inbound")
-    .order("created_at", { ascending: true })
-    .limit(3);
+    .order("created_at", { ascending: true });
 
-  if (inboundError) throw inboundError;
+  if (timelineError) throw timelineError;
 
-  const initialMessage = inboundMessages?.[0]?.body?.trim() || "Sin mensaje inicial";
-  const businessAnswer = inboundMessages?.[1]?.body?.trim() || "Sin respuesta";
-  const salesProcessAnswer = inboundMessages?.[2]?.body?.trim() || "Sin respuesta";
+  const messages = timeline ?? [];
+  const firstQuestionIndex = messages.findIndex(
+    (item) => item.direction === "outbound" && item.body === FIRST_REPLY,
+  );
+  const secondQuestionIndex = messages.findIndex(
+    (item) => item.direction === "outbound" && item.body === SECOND_REPLY,
+  );
+
+  let initialMessage = "Sin mensaje inicial";
+  if (firstQuestionIndex > 0) {
+    for (let index = firstQuestionIndex - 1; index >= 0; index -= 1) {
+      if (messages[index]?.direction === "inbound" && messages[index]?.body?.trim()) {
+        initialMessage = messages[index].body.trim();
+        break;
+      }
+    }
+  }
+
+  let businessAnswer = "Sin respuesta";
+  if (firstQuestionIndex >= 0 && secondQuestionIndex > firstQuestionIndex) {
+    for (let index = firstQuestionIndex + 1; index < secondQuestionIndex; index += 1) {
+      if (messages[index]?.direction === "inbound" && messages[index]?.body?.trim()) {
+        businessAnswer = messages[index].body.trim();
+        break;
+      }
+    }
+  }
+
+  let salesProcessAnswer = "Sin respuesta";
+  if (secondQuestionIndex >= 0) {
+    for (let index = secondQuestionIndex + 1; index < messages.length; index += 1) {
+      if (messages[index]?.direction === "inbound" && messages[index]?.body?.trim()) {
+        salesProcessAnswer = messages[index].body.trim();
+        break;
+      }
+    }
+  }
+
   const now = new Date().toISOString();
   const summary = [
     "WhatsApp V1 completado",
@@ -362,6 +400,19 @@ async function finishWhatsAppV1Handoff(args: {
 
 async function processIncomingMessage(message: IncomingTextMessage) {
   const ownerId = requiredEnv("CRM_OWNER_ID");
+  const expectedPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
+
+  if (
+    expectedPhoneNumberId &&
+    message.phoneNumberId &&
+    message.phoneNumberId !== expectedPhoneNumberId
+  ) {
+    console.warn(
+      `WhatsApp webhook ignored for unexpected phone_number_id: ${message.phoneNumberId}`,
+    );
+    return { duplicate: false, replied: false, handoff: false, ignored: true };
+  }
+
   const supabase = createAdminClient();
 
   const { data: duplicate, error: duplicateError } = await supabase
@@ -371,7 +422,9 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     .maybeSingle();
 
   if (duplicateError) throw duplicateError;
-  if (duplicate) return { duplicate: true, replied: false, handoff: false };
+  if (duplicate) {
+    return { duplicate: true, replied: false, handoff: false, ignored: false };
+  }
 
   const contact = await getOrCreateContact({
     ownerId,
@@ -390,14 +443,6 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     receivedAt: message.receivedAt,
   });
 
-  const { count: previousInboundCount, error: countError } = await supabase
-    .from("messages")
-    .select("id", { count: "exact", head: true })
-    .eq("conversation_id", conversation.id)
-    .eq("direction", "inbound");
-
-  if (countError) throw countError;
-
   const { error: insertError } = await supabase.from("messages").insert({
     owner_id: ownerId,
     conversation_id: conversation.id,
@@ -415,7 +460,7 @@ async function processIncomingMessage(message: IncomingTextMessage) {
 
   if (insertError) {
     if (insertError.code === "23505") {
-      return { duplicate: true, replied: false, handoff: false };
+      return { duplicate: true, replied: false, handoff: false, ignored: false };
     }
     throw insertError;
   }
@@ -432,7 +477,7 @@ async function processIncomingMessage(message: IncomingTextMessage) {
   if (conversationUpdateError) throw conversationUpdateError;
 
   if (conversation.bot_paused) {
-    return { duplicate: false, replied: false, handoff: false };
+    return { duplicate: false, replied: false, handoff: false, ignored: false };
   }
 
   // If outbound credentials are still unavailable, keep receiving and storing
@@ -440,12 +485,25 @@ async function processIncomingMessage(message: IncomingTextMessage) {
   // automatically on the next eligible message.
   if (!isWhatsAppSendConfigured()) {
     console.warn("WhatsApp send skipped: outbound credentials are not configured yet");
-    return { duplicate: false, replied: false, handoff: false };
+    return { duplicate: false, replied: false, handoff: false, ignored: false };
   }
 
-  const inboundStep = previousInboundCount ?? 0;
+  const { data: sentBotMessages, error: botStateError } = await supabase
+    .from("messages")
+    .select("body")
+    .eq("conversation_id", conversation.id)
+    .eq("direction", "outbound")
+    .in("body", [FIRST_REPLY, SECOND_REPLY, HANDOFF_REPLY]);
 
-  if (inboundStep === 0) {
+  if (botStateError) throw botStateError;
+
+  const sentBodies = new Set(
+    (sentBotMessages ?? [])
+      .map((item) => item.body)
+      .filter((body): body is string => typeof body === "string"),
+  );
+
+  if (!sentBodies.has(FIRST_REPLY)) {
     await sendAndPersistReply({
       ownerId,
       conversationId: conversation.id,
@@ -453,10 +511,10 @@ async function processIncomingMessage(message: IncomingTextMessage) {
       to: message.from,
       body: FIRST_REPLY,
     });
-    return { duplicate: false, replied: true, handoff: false };
+    return { duplicate: false, replied: true, handoff: false, ignored: false };
   }
 
-  if (inboundStep === 1) {
+  if (!sentBodies.has(SECOND_REPLY)) {
     await sendAndPersistReply({
       ownerId,
       conversationId: conversation.id,
@@ -464,10 +522,10 @@ async function processIncomingMessage(message: IncomingTextMessage) {
       to: message.from,
       body: SECOND_REPLY,
     });
-    return { duplicate: false, replied: true, handoff: false };
+    return { duplicate: false, replied: true, handoff: false, ignored: false };
   }
 
-  if (inboundStep === 2) {
+  if (!sentBodies.has(HANDOFF_REPLY)) {
     await finishWhatsAppV1Handoff({
       ownerId,
       leadId: lead.id,
@@ -481,10 +539,10 @@ async function processIncomingMessage(message: IncomingTextMessage) {
       to: message.from,
       body: HANDOFF_REPLY,
     });
-    return { duplicate: false, replied: true, handoff: true };
+    return { duplicate: false, replied: true, handoff: true, ignored: false };
   }
 
-  return { duplicate: false, replied: false, handoff: false };
+  return { duplicate: false, replied: false, handoff: false, ignored: false };
 }
 
 export async function GET(request: Request) {
@@ -535,6 +593,7 @@ export async function POST(request: Request) {
       replied: results.filter((result) => result.replied).length,
       handoffs: results.filter((result) => result.handoff).length,
       duplicates: results.filter((result) => result.duplicate).length,
+      ignored: results.filter((result) => result.ignored).length,
     });
   } catch (error) {
     console.error("WhatsApp webhook error", error);

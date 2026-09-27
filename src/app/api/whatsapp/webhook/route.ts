@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyAdminOfWhatsAppHandoff } from "@/lib/whatsapp/admin-alert";
 import {
+  classifyWhatsAppReply,
+  type WhatsAppQualificationStage,
+  type WhatsAppReplyClassification,
+} from "@/lib/whatsapp/semantic-classifier";
+import {
   isWhatsAppSendConfigured,
   sendWhatsAppText,
   verifyMetaWebhookSignature,
@@ -16,11 +21,23 @@ const FIRST_REPLY =
 const CLARIFY_FIRST_REPLY =
   "Claro 👍 Solo dime dos cosas: qué vende tu negocio y de dónde suelen llegar hoy tus clientes. Por ejemplo: Meta Ads, Instagram, recomendaciones o WhatsApp.";
 
+const ASK_WHAT_SELLS_REPLY =
+  "Perfecto 👍 ¿Y qué vende u ofrece tu negocio?";
+
+const ASK_LEAD_SOURCE_REPLY =
+  "Perfecto 👍 ¿Y de dónde suelen llegar hoy tus clientes? Por ejemplo: Meta Ads, Instagram, recomendaciones, Google o WhatsApp.";
+
+const RETURN_TO_FIRST_REPLY =
+  "Te ayudo con eso 👍 Antes solo necesito entender qué vende tu negocio y de dónde suelen llegar hoy tus clientes.";
+
 const SECOND_REPLY =
   "Perfecto. Cuando una persona se interesa, ¿qué suele pasar después hasta que compra, agenda o pide una cotización?";
 
 const CLARIFY_SECOND_REPLY =
   "Claro 👍 Me refiero a qué haces tú después de que alguien te escribe interesado. Por ejemplo: ¿le mandas precio directo, le pides datos para cotizar, agenda una llamada o paga en línea?";
+
+const RETURN_TO_SECOND_REPLY =
+  "Te respondo eso enseguida 👍 Antes necesito entender una cosa: cuando alguien se interesa, ¿qué haces después hasta que compra, agenda o pide una cotización?";
 
 const HANDOFF_REPLY =
   "Perfecto, con esto ya tengo buen contexto 👍 Se lo dejo preparado a Eder para que continúe contigo personalmente.";
@@ -55,9 +72,7 @@ type IncomingTextMessage = {
 
 function requiredEnv(name: string) {
   const value = process.env[name]?.trim();
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
 }
 
@@ -85,15 +100,13 @@ function normalizeText(value: string) {
     .trim();
 }
 
-function isClarificationRequest(value: string) {
+// This remains only as a fallback if the AI classifier is temporarily unavailable.
+function isObviousClarificationRequest(value: string) {
   const normalized = normalizeText(value);
   if (!normalized) return false;
+  if (["como", "como asi", "que", "no se"].includes(normalized)) return true;
 
-  if (["como", "como asi", "que", "no se"].includes(normalized)) {
-    return true;
-  }
-
-  const clarificationPhrases = [
+  return [
     "no entendi",
     "no entiendo",
     "no comprendi",
@@ -104,23 +117,96 @@ function isClarificationRequest(value: string) {
     "puedes explicar",
     "explicame",
     "no me queda claro",
-  ];
+  ].some((phrase) => normalized.includes(phrase));
+}
 
-  return clarificationPhrases.some((phrase) => normalized.includes(phrase));
+function fallbackClassification(message: string): WhatsAppReplyClassification {
+  if (isObviousClarificationRequest(message)) {
+    return {
+      status: "needs_clarification",
+      extracted_answer: "",
+      missing_information: [],
+      confidence: 0,
+      reason: "Fallback heuristic used because semantic classifier was unavailable",
+    };
+  }
+
+  return {
+    status: "complete",
+    extracted_answer: message.trim(),
+    missing_information: [],
+    confidence: 0,
+    reason: "Fail-open fallback used because semantic classifier was unavailable",
+  };
+}
+
+async function understandReply(args: {
+  stage: WhatsAppQualificationStage;
+  question: string;
+  message: string;
+}) {
+  return (
+    (await classifyWhatsAppReply(args)) ?? fallbackClassification(args.message)
+  );
+}
+
+function followupForClassification(
+  stage: WhatsAppQualificationStage,
+  classification: WhatsAppReplyClassification,
+) {
+  if (stage === "business_context") {
+    if (classification.status === "needs_clarification") return CLARIFY_FIRST_REPLY;
+    if (
+      classification.status === "incomplete" &&
+      classification.missing_information.includes("what_sells")
+    ) {
+      return ASK_WHAT_SELLS_REPLY;
+    }
+    if (
+      classification.status === "incomplete" &&
+      classification.missing_information.includes("lead_source")
+    ) {
+      return ASK_LEAD_SOURCE_REPLY;
+    }
+    return RETURN_TO_FIRST_REPLY;
+  }
+
+  if (
+    classification.status === "needs_clarification" ||
+    classification.status === "incomplete"
+  ) {
+    return CLARIFY_SECOND_REPLY;
+  }
+  return RETURN_TO_SECOND_REPLY;
+}
+
+async function saveStageAnswer(args: {
+  leadId: string;
+  stage: WhatsAppQualificationStage;
+  answer: string;
+}) {
+  const answer = args.answer.trim();
+  if (!answer) return;
+
+  const supabase = createAdminClient();
+  const field = args.stage === "business_context" ? "what_sells" : "how_sells";
+  const { error } = await supabase
+    .from("leads")
+    .update({ [field]: answer, updated_at: new Date().toISOString() })
+    .eq("id", args.leadId);
+
+  if (error) throw error;
 }
 
 function timestampToIso(value: unknown) {
   const seconds = Number(value);
-  if (!Number.isFinite(seconds) || seconds <= 0) {
-    return new Date().toISOString();
-  }
+  if (!Number.isFinite(seconds) || seconds <= 0) return new Date().toISOString();
   return new Date(seconds * 1000).toISOString();
 }
 
 function extractIncomingTextMessages(payload: unknown): IncomingTextMessage[] {
   const root = asRecord(payload);
   if (!root) return [];
-
   const extracted: IncomingTextMessage[] = [];
 
   for (const entryValue of asArray(root.entry)) {
@@ -134,8 +220,8 @@ function extractIncomingTextMessages(payload: unknown): IncomingTextMessage[] {
 
       const metadata = asRecord(value.metadata);
       const phoneNumberId = asString(metadata?.phone_number_id) || null;
-
       const contactNames = new Map<string, string>();
+
       for (const contactValue of asArray(value.contacts)) {
         const contact = asRecord(contactValue);
         const waId = asString(contact?.wa_id);
@@ -153,7 +239,6 @@ function extractIncomingTextMessages(payload: unknown): IncomingTextMessage[] {
         const type = asString(message.type);
         const text = asRecord(message.text);
         const body = asString(text?.body);
-
         if (!id || !from || type !== "text" || !body) continue;
 
         extracted.push({
@@ -188,10 +273,7 @@ async function getOrCreateContact(args: {
   if (findError) throw findError;
   if (existing) {
     if (!existing.full_name && args.senderName) {
-      await supabase
-        .from("contacts")
-        .update({ full_name: args.senderName })
-        .eq("id", existing.id);
+      await supabase.from("contacts").update({ full_name: args.senderName }).eq("id", existing.id);
     }
     return existing;
   }
@@ -210,7 +292,6 @@ async function getOrCreateContact(args: {
   if (createError || !created) {
     throw createError ?? new Error("Could not create WhatsApp contact");
   }
-
   return created;
 }
 
@@ -248,7 +329,6 @@ async function getOrCreateLead(args: {
   if (createError || !created) {
     throw createError ?? new Error("Could not create WhatsApp lead");
   }
-
   return created;
 }
 
@@ -293,7 +373,6 @@ async function getOrCreateConversation(args: {
   if (createError || !created) {
     throw createError ?? new Error("Could not create WhatsApp conversation");
   }
-
   return created;
 }
 
@@ -322,17 +401,12 @@ async function sendAndPersistReply(args: {
     review_status: "not_required",
     sent_at: sentAt,
   });
-
   if (outboundInsertError) throw outboundInsertError;
 
   const { error: conversationUpdateError } = await supabase
     .from("conversations")
-    .update({
-      last_message_at: sentAt,
-      last_outbound_at: sentAt,
-    })
+    .update({ last_message_at: sentAt, last_outbound_at: sentAt })
     .eq("id", args.conversationId);
-
   if (conversationUpdateError) throw conversationUpdateError;
 }
 
@@ -343,20 +417,25 @@ async function finishWhatsAppV1Handoff(args: {
   conversationId: string;
 }) {
   const supabase = createAdminClient();
-  const { data: timeline, error: timelineError } = await supabase
-    .from("messages")
-    .select("body,direction,created_at")
-    .eq("conversation_id", args.conversationId)
-    .order("created_at", { ascending: true });
+  const [timelineResult, leadResult] = await Promise.all([
+    supabase
+      .from("messages")
+      .select("body,direction,created_at")
+      .eq("conversation_id", args.conversationId)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("leads")
+      .select("what_sells,how_sells")
+      .eq("id", args.leadId)
+      .maybeSingle(),
+  ]);
 
-  if (timelineError) throw timelineError;
+  if (timelineResult.error) throw timelineResult.error;
+  if (leadResult.error) throw leadResult.error;
 
-  const messages = timeline ?? [];
+  const messages = timelineResult.data ?? [];
   const firstQuestionIndex = messages.findIndex(
     (item) => item.direction === "outbound" && item.body === FIRST_REPLY,
-  );
-  const secondQuestionIndex = messages.findIndex(
-    (item) => item.direction === "outbound" && item.body === SECOND_REPLY,
   );
 
   let initialMessage = "Sin mensaje inicial";
@@ -369,34 +448,8 @@ async function finishWhatsAppV1Handoff(args: {
     }
   }
 
-  let businessAnswer = "Sin respuesta";
-  if (firstQuestionIndex >= 0 && secondQuestionIndex > firstQuestionIndex) {
-    for (let index = firstQuestionIndex + 1; index < secondQuestionIndex; index += 1) {
-      if (
-        messages[index]?.direction === "inbound" &&
-        messages[index]?.body?.trim() &&
-        !isClarificationRequest(messages[index].body)
-      ) {
-        businessAnswer = messages[index].body.trim();
-        break;
-      }
-    }
-  }
-
-  let salesProcessAnswer = "Sin respuesta";
-  if (secondQuestionIndex >= 0) {
-    for (let index = secondQuestionIndex + 1; index < messages.length; index += 1) {
-      if (
-        messages[index]?.direction === "inbound" &&
-        messages[index]?.body?.trim() &&
-        !isClarificationRequest(messages[index].body)
-      ) {
-        salesProcessAnswer = messages[index].body.trim();
-        break;
-      }
-    }
-  }
-
+  const businessAnswer = leadResult.data?.what_sells?.trim() || "Sin respuesta";
+  const salesProcessAnswer = leadResult.data?.how_sells?.trim() || "Sin respuesta";
   const now = new Date().toISOString();
   const summary = [
     "WhatsApp V1 completado",
@@ -410,40 +463,30 @@ async function finishWhatsAppV1Handoff(args: {
     .from("leads")
     .update({
       status: "calificado",
-      what_sells: businessAnswer,
-      how_sells: salesProcessAnswer,
       human_required: true,
       human_reason: "whatsapp_v1_ready_for_handoff",
       conversation_summary: summary,
       updated_at: now,
     })
     .eq("id", args.leadId);
-
   if (leadUpdateError) throw leadUpdateError;
 
   if (args.previousLeadStatus !== "calificado") {
-    const { error: historyError } = await supabase
-      .from("lead_status_history")
-      .insert({
-        owner_id: args.ownerId,
-        lead_id: args.leadId,
-        from_status: args.previousLeadStatus,
-        to_status: "calificado",
-        changed_by_type: "system",
-        reason: "WhatsApp V1 completed; ready for human handoff",
-      });
-
+    const { error: historyError } = await supabase.from("lead_status_history").insert({
+      owner_id: args.ownerId,
+      lead_id: args.leadId,
+      from_status: args.previousLeadStatus,
+      to_status: "calificado",
+      changed_by_type: "system",
+      reason: "WhatsApp V1 completed; ready for human handoff",
+    });
     if (historyError) throw historyError;
   }
 
   const { error: conversationUpdateError } = await supabase
     .from("conversations")
-    .update({
-      bot_paused: true,
-      updated_at: now,
-    })
+    .update({ bot_paused: true, updated_at: now })
     .eq("id", args.conversationId);
-
   if (conversationUpdateError) throw conversationUpdateError;
 }
 
@@ -456,35 +499,21 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     message.phoneNumberId &&
     message.phoneNumberId !== expectedPhoneNumberId
   ) {
-    console.warn(
-      `WhatsApp webhook ignored for unexpected phone_number_id: ${message.phoneNumberId}`,
-    );
+    console.warn(`WhatsApp webhook ignored for unexpected phone_number_id: ${message.phoneNumberId}`);
     return { duplicate: false, replied: false, handoff: false, ignored: true };
   }
 
   const supabase = createAdminClient();
-
   const { data: duplicate, error: duplicateError } = await supabase
     .from("messages")
     .select("id")
     .eq("provider_message_id", message.id)
     .maybeSingle();
-
   if (duplicateError) throw duplicateError;
-  if (duplicate) {
-    return { duplicate: true, replied: false, handoff: false, ignored: false };
-  }
+  if (duplicate) return { duplicate: true, replied: false, handoff: false, ignored: false };
 
-  const contact = await getOrCreateContact({
-    ownerId,
-    phone: message.from,
-    senderName: message.senderName,
-  });
-  const lead = await getOrCreateLead({
-    ownerId,
-    contactId: contact.id,
-    originalMessage: message.body,
-  });
+  const contact = await getOrCreateContact({ ownerId, phone: message.from, senderName: message.senderName });
+  const lead = await getOrCreateLead({ ownerId, contactId: contact.id, originalMessage: message.body });
   const conversation = await getOrCreateConversation({
     ownerId,
     leadId: lead.id,
@@ -506,7 +535,6 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     raw_payload: message.rawMessage,
     received_at: message.receivedAt,
   });
-
   if (insertError) {
     if (insertError.code === "23505") {
       return { duplicate: true, replied: false, handoff: false, ignored: false };
@@ -522,16 +550,12 @@ async function processIncomingMessage(message: IncomingTextMessage) {
       unread_count: (conversation.unread_count ?? 0) + 1,
     })
     .eq("id", conversation.id);
-
   if (conversationUpdateError) throw conversationUpdateError;
 
   if (conversation.bot_paused) {
     return { duplicate: false, replied: false, handoff: false, ignored: false };
   }
 
-  // If outbound credentials are still unavailable, keep receiving and storing
-  // messages without failing the webhook. Once configured, replies start
-  // automatically on the next eligible message.
   if (!isWhatsAppSendConfigured()) {
     console.warn("WhatsApp send skipped: outbound credentials are not configured yet");
     return { duplicate: false, replied: false, handoff: false, ignored: false };
@@ -543,7 +567,6 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     .eq("conversation_id", conversation.id)
     .eq("direction", "outbound")
     .in("body", [FIRST_REPLY, SECOND_REPLY, HANDOFF_REPLY]);
-
   if (botStateError) throw botStateError;
 
   const sentBodies = new Set(
@@ -564,17 +587,32 @@ async function processIncomingMessage(message: IncomingTextMessage) {
   }
 
   if (!sentBodies.has(SECOND_REPLY)) {
-    if (isClarificationRequest(message.body)) {
+    const classification = await understandReply({
+      stage: "business_context",
+      question: FIRST_REPLY,
+      message: message.body,
+    });
+
+    if (
+      classification.status !== "complete" ||
+      !classification.extracted_answer.trim() ||
+      (classification.confidence > 0 && classification.confidence < 0.6)
+    ) {
       await sendAndPersistReply({
         ownerId,
         conversationId: conversation.id,
         leadId: lead.id,
         to: message.from,
-        body: CLARIFY_FIRST_REPLY,
+        body: followupForClassification("business_context", classification),
       });
       return { duplicate: false, replied: true, handoff: false, ignored: false };
     }
 
+    await saveStageAnswer({
+      leadId: lead.id,
+      stage: "business_context",
+      answer: classification.extracted_answer,
+    });
     await sendAndPersistReply({
       ownerId,
       conversationId: conversation.id,
@@ -586,17 +624,32 @@ async function processIncomingMessage(message: IncomingTextMessage) {
   }
 
   if (!sentBodies.has(HANDOFF_REPLY)) {
-    if (isClarificationRequest(message.body)) {
+    const classification = await understandReply({
+      stage: "sales_process",
+      question: SECOND_REPLY,
+      message: message.body,
+    });
+
+    if (
+      classification.status !== "complete" ||
+      !classification.extracted_answer.trim() ||
+      (classification.confidence > 0 && classification.confidence < 0.6)
+    ) {
       await sendAndPersistReply({
         ownerId,
         conversationId: conversation.id,
         leadId: lead.id,
         to: message.from,
-        body: CLARIFY_SECOND_REPLY,
+        body: followupForClassification("sales_process", classification),
       });
       return { duplicate: false, replied: true, handoff: false, ignored: false };
     }
 
+    await saveStageAnswer({
+      leadId: lead.id,
+      stage: "sales_process",
+      answer: classification.extracted_answer,
+    });
     await finishWhatsAppV1Handoff({
       ownerId,
       leadId: lead.id,
@@ -628,12 +681,7 @@ export async function GET(request: Request) {
   const challenge = url.searchParams.get("hub.challenge");
   const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN?.trim();
 
-  if (
-    mode === "subscribe" &&
-    verifyToken &&
-    token === verifyToken &&
-    challenge
-  ) {
+  if (mode === "subscribe" && verifyToken && token === verifyToken && challenge) {
     return new NextResponse(challenge, { status: 200 });
   }
 
@@ -651,9 +699,6 @@ export async function POST(request: Request) {
 
     const payload = JSON.parse(rawBody) as unknown;
     const messages = extractIncomingTextMessages(payload);
-
-    // Meta also posts delivery/read statuses to this endpoint. They are
-    // acknowledged here but ignored by this first MVP.
     if (messages.length === 0) {
       return NextResponse.json({ ok: true, processed: 0 });
     }

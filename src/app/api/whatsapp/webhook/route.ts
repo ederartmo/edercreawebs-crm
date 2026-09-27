@@ -2,10 +2,9 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyAdminOfWhatsAppHandoff } from "@/lib/whatsapp/admin-alert";
 import {
-  classifyWhatsAppReply,
-  type WhatsAppQualificationStage,
-  type WhatsAppReplyClassification,
-} from "@/lib/whatsapp/semantic-classifier";
+  runWhatsAppSalesAgent,
+  type WhatsAppAgentMessage,
+} from "@/lib/whatsapp/sales-agent";
 import {
   isWhatsAppSendConfigured,
   sendWhatsAppText,
@@ -14,33 +13,6 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const FIRST_REPLY =
-  "Hola 😁 Cuéntame un poco de tu negocio: ¿qué vendes y cómo suelen llegarte actualmente tus clientes?";
-
-const CLARIFY_FIRST_REPLY =
-  "Claro 👍 Solo dime dos cosas: qué vende tu negocio y de dónde suelen llegar hoy tus clientes. Por ejemplo: Meta Ads, Instagram, recomendaciones o WhatsApp.";
-
-const ASK_WHAT_SELLS_REPLY =
-  "Perfecto 👍 ¿Y qué vende u ofrece tu negocio?";
-
-const ASK_LEAD_SOURCE_REPLY =
-  "Perfecto 👍 ¿Y de dónde suelen llegar hoy tus clientes? Por ejemplo: Meta Ads, Instagram, recomendaciones, Google o WhatsApp.";
-
-const RETURN_TO_FIRST_REPLY =
-  "Te ayudo con eso 👍 Antes solo necesito entender qué vende tu negocio y de dónde suelen llegar hoy tus clientes.";
-
-const SECOND_REPLY =
-  "Perfecto. Cuando una persona se interesa, ¿qué suele pasar después hasta que compra, agenda o pide una cotización?";
-
-const CLARIFY_SECOND_REPLY =
-  "Claro 👍 Me refiero a qué haces tú después de que alguien te escribe interesado. Por ejemplo: ¿le mandas precio directo, le pides datos para cotizar, agenda una llamada o paga en línea?";
-
-const RETURN_TO_SECOND_REPLY =
-  "Te respondo eso enseguida 👍 Antes necesito entender una cosa: cuando alguien se interesa, ¿qué haces después hasta que compra, agenda o pide una cotización?";
-
-const HANDOFF_REPLY =
-  "Perfecto, con esto ya tengo buen contexto 👍 Se lo dejo preparado a Eder para que continúe contigo personalmente.";
 
 const ACTIVE_LEAD_STATUSES = [
   "nuevo",
@@ -88,132 +60,6 @@ function asArray(value: unknown): unknown[] {
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function normalizeText(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// Only a resilience fallback. Normal production interpretation is semantic/AI-based.
-function isObviousClarificationRequest(value: string) {
-  const normalized = normalizeText(value);
-  if (!normalized) return false;
-  if (["como", "como asi", "que", "no se"].includes(normalized)) return true;
-
-  return [
-    "no entendi",
-    "no entiendo",
-    "no comprendi",
-    "no comprendo",
-    "a que te refieres",
-    "que quieres decir",
-    "me explicas",
-    "puedes explicar",
-    "explicame",
-    "no me queda claro",
-  ].some((phrase) => normalized.includes(phrase));
-}
-
-function fallbackClassification(message: string): WhatsAppReplyClassification {
-  if (isObviousClarificationRequest(message)) {
-    return {
-      status: "needs_clarification",
-      extracted_answer: "",
-      missing_information: [],
-      confidence: 0,
-      reason: "Fallback heuristic used because semantic classifier was unavailable",
-    };
-  }
-
-  return {
-    status: "complete",
-    extracted_answer: message.trim(),
-    missing_information: [],
-    confidence: 0,
-    reason: "Fail-open fallback used because semantic classifier was unavailable",
-  };
-}
-
-async function understandReply(args: {
-  stage: WhatsAppQualificationStage;
-  question: string;
-  message: string;
-  knownContext?: string;
-}) {
-  return (
-    (await classifyWhatsAppReply(args)) ?? fallbackClassification(args.message)
-  );
-}
-
-function followupForClassification(
-  stage: WhatsAppQualificationStage,
-  classification: WhatsAppReplyClassification,
-) {
-  if (stage === "business_context") {
-    if (classification.status === "needs_clarification") return CLARIFY_FIRST_REPLY;
-    if (
-      classification.status === "incomplete" &&
-      classification.missing_information.includes("what_sells")
-    ) {
-      return ASK_WHAT_SELLS_REPLY;
-    }
-    if (
-      classification.status === "incomplete" &&
-      classification.missing_information.includes("lead_source")
-    ) {
-      return ASK_LEAD_SOURCE_REPLY;
-    }
-    return RETURN_TO_FIRST_REPLY;
-  }
-
-  if (
-    classification.status === "needs_clarification" ||
-    classification.status === "incomplete"
-  ) {
-    return CLARIFY_SECOND_REPLY;
-  }
-  return RETURN_TO_SECOND_REPLY;
-}
-
-async function saveStageAnswer(args: {
-  leadId: string;
-  stage: WhatsAppQualificationStage;
-  answer: string;
-}) {
-  const answer = args.answer.trim();
-  if (!answer) return;
-
-  const supabase = createAdminClient();
-  const field = args.stage === "business_context" ? "what_sells" : "how_sells";
-  const { error } = await supabase
-    .from("leads")
-    .update({ [field]: answer, updated_at: new Date().toISOString() })
-    .eq("id", args.leadId);
-
-  if (error) throw error;
-}
-
-async function getStageKnownContext(
-  leadId: string,
-  stage: WhatsAppQualificationStage,
-) {
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("leads")
-    .select("what_sells,how_sells")
-    .eq("id", leadId)
-    .maybeSingle();
-
-  if (error) throw error;
-  return stage === "business_context"
-    ? data?.what_sells?.trim() || ""
-    : data?.how_sells?.trim() || "";
 }
 
 function timestampToIso(value: unknown) {
@@ -291,7 +137,11 @@ async function getOrCreateContact(args: {
   if (findError) throw findError;
   if (existing) {
     if (!existing.full_name && args.senderName) {
-      await supabase.from("contacts").update({ full_name: args.senderName }).eq("id", existing.id);
+      await supabase
+        .from("contacts")
+        .update({ full_name: args.senderName })
+        .eq("id", existing.id);
+      return { ...existing, full_name: args.senderName };
     }
     return existing;
   }
@@ -428,61 +278,84 @@ async function sendAndPersistReply(args: {
   if (conversationUpdateError) throw conversationUpdateError;
 }
 
-async function finishWhatsAppV1Handoff(args: {
-  ownerId: string;
+async function getAgentContext(args: {
   leadId: string;
-  previousLeadStatus: string;
   conversationId: string;
+  contactName: string | null;
 }) {
   const supabase = createAdminClient();
-  const [timelineResult, leadResult] = await Promise.all([
+  const [leadResult, timelineResult] = await Promise.all([
+    supabase
+      .from("leads")
+      .select("original_message,what_sells,how_sells")
+      .eq("id", args.leadId)
+      .maybeSingle(),
     supabase
       .from("messages")
       .select("body,direction,created_at")
       .eq("conversation_id", args.conversationId)
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("leads")
-      .select("what_sells,how_sells")
-      .eq("id", args.leadId)
-      .maybeSingle(),
+      .in("direction", ["inbound", "outbound"])
+      .order("created_at", { ascending: false })
+      .limit(30),
   ]);
 
-  if (timelineResult.error) throw timelineResult.error;
   if (leadResult.error) throw leadResult.error;
+  if (timelineResult.error) throw timelineResult.error;
 
-  const messages = timelineResult.data ?? [];
-  const firstQuestionIndex = messages.findIndex(
-    (item) => item.direction === "outbound" && item.body === FIRST_REPLY,
-  );
+  const messages: WhatsAppAgentMessage[] = (timelineResult.data ?? [])
+    .slice()
+    .reverse()
+    .filter((item) => typeof item.body === "string" && item.body.trim())
+    .map((item) => ({
+      role: item.direction === "outbound" ? "assistant" : "user",
+      content: item.body.trim(),
+    }));
 
-  let initialMessage = "Sin mensaje inicial";
-  if (firstQuestionIndex > 0) {
-    for (let index = firstQuestionIndex - 1; index >= 0; index -= 1) {
-      if (messages[index]?.direction === "inbound" && messages[index]?.body?.trim()) {
-        initialMessage = messages[index].body.trim();
-        break;
-      }
-    }
-  }
+  return {
+    lead: {
+      leadId: args.leadId,
+      contactName: args.contactName,
+      originalMessage: leadResult.data?.original_message?.trim() || null,
+      whatSells: leadResult.data?.what_sells?.trim() || null,
+      howSells: leadResult.data?.how_sells?.trim() || null,
+    },
+    messages,
+  };
+}
 
-  const businessAnswer = leadResult.data?.what_sells?.trim() || "Sin respuesta";
-  const salesProcessAnswer = leadResult.data?.how_sells?.trim() || "Sin respuesta";
+async function finishWhatsAppAgentHandoff(args: {
+  ownerId: string;
+  leadId: string;
+  previousLeadStatus: string;
+  conversationId: string;
+  agentSummary: string | null;
+  handoffReason: string | null;
+}) {
+  const supabase = createAdminClient();
+  const { data: leadData, error: leadReadError } = await supabase
+    .from("leads")
+    .select("what_sells,how_sells")
+    .eq("id", args.leadId)
+    .maybeSingle();
+  if (leadReadError) throw leadReadError;
+
   const now = new Date().toISOString();
   const summary = [
-    "WhatsApp V1 completado",
-    `Mensaje inicial: ${initialMessage}`,
-    `Negocio y cómo llegan clientes: ${businessAnswer}`,
-    `Qué pasa después hasta compra, agenda o cotización: ${salesProcessAnswer}`,
-    "Estado: listo para seguimiento humano.",
-  ].join("\n");
+    "WhatsApp Agent V2 — listo para Eder",
+    args.agentSummary ? `Resumen del agente: ${args.agentSummary}` : null,
+    `Negocio/adquisición: ${leadData?.what_sells?.trim() || "Pendiente"}`,
+    `Proceso comercial: ${leadData?.how_sells?.trim() || "Pendiente"}`,
+    args.handoffReason ? `Motivo del handoff: ${args.handoffReason}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const { error: leadUpdateError } = await supabase
     .from("leads")
     .update({
       status: "calificado",
       human_required: true,
-      human_reason: "whatsapp_v1_ready_for_handoff",
+      human_reason: "whatsapp_agent_v2_ready_for_handoff",
       conversation_summary: summary,
       updated_at: now,
     })
@@ -496,7 +369,7 @@ async function finishWhatsAppV1Handoff(args: {
       from_status: args.previousLeadStatus,
       to_status: "calificado",
       changed_by_type: "system",
-      reason: "WhatsApp V1 completed; ready for human handoff",
+      reason: "WhatsApp Agent V2 requested human handoff",
     });
     if (historyError) throw historyError;
   }
@@ -517,7 +390,9 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     message.phoneNumberId &&
     message.phoneNumberId !== expectedPhoneNumberId
   ) {
-    console.warn(`WhatsApp webhook ignored for unexpected phone_number_id: ${message.phoneNumberId}`);
+    console.warn(
+      `WhatsApp webhook ignored for unexpected phone_number_id: ${message.phoneNumberId}`,
+    );
     return { duplicate: false, replied: false, handoff: false, ignored: true };
   }
 
@@ -528,10 +403,20 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     .eq("provider_message_id", message.id)
     .maybeSingle();
   if (duplicateError) throw duplicateError;
-  if (duplicate) return { duplicate: true, replied: false, handoff: false, ignored: false };
+  if (duplicate) {
+    return { duplicate: true, replied: false, handoff: false, ignored: false };
+  }
 
-  const contact = await getOrCreateContact({ ownerId, phone: message.from, senderName: message.senderName });
-  const lead = await getOrCreateLead({ ownerId, contactId: contact.id, originalMessage: message.body });
+  const contact = await getOrCreateContact({
+    ownerId,
+    phone: message.from,
+    senderName: message.senderName,
+  });
+  const lead = await getOrCreateLead({
+    ownerId,
+    contactId: contact.id,
+    originalMessage: message.body,
+  });
   const conversation = await getOrCreateConversation({
     ownerId,
     leadId: lead.id,
@@ -579,143 +464,60 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     return { duplicate: false, replied: false, handoff: false, ignored: false };
   }
 
-  const { data: sentBotMessages, error: botStateError } = await supabase
-    .from("messages")
-    .select("body")
-    .eq("conversation_id", conversation.id)
-    .eq("direction", "outbound")
-    .in("body", [FIRST_REPLY, SECOND_REPLY, HANDOFF_REPLY]);
-  if (botStateError) throw botStateError;
+  const agentContext = await getAgentContext({
+    leadId: lead.id,
+    conversationId: conversation.id,
+    contactName: contact.full_name ?? message.senderName,
+  });
 
-  const sentBodies = new Set(
-    (sentBotMessages ?? [])
-      .map((item) => item.body)
-      .filter((body): body is string => typeof body === "string"),
-  );
-
-  if (!sentBodies.has(FIRST_REPLY)) {
+  let agentResult;
+  try {
+    agentResult = await runWhatsAppSalesAgent(agentContext);
+  } catch (error) {
+    console.error("WhatsApp sales agent error", error);
     await sendAndPersistReply({
       ownerId,
       conversationId: conversation.id,
       leadId: lead.id,
       to: message.from,
-      body: FIRST_REPLY,
+      body: "Te sigo 👍 Se me cruzó un problema técnico un segundo. ¿Me repites el último mensaje? Prefiero preguntarte otra vez a responderte cualquier cosa.",
     });
     return { duplicate: false, replied: true, handoff: false, ignored: false };
   }
 
-  if (!sentBodies.has(SECOND_REPLY)) {
-    const knownContext = await getStageKnownContext(lead.id, "business_context");
-    const classification = await understandReply({
-      stage: "business_context",
-      question: FIRST_REPLY,
-      message: message.body,
-      knownContext,
-    });
-
-    if (
-      classification.status !== "complete" ||
-      !classification.extracted_answer.trim() ||
-      (classification.confidence > 0 && classification.confidence < 0.6)
-    ) {
-      if (
-        classification.status === "incomplete" &&
-        classification.extracted_answer.trim()
-      ) {
-        await saveStageAnswer({
-          leadId: lead.id,
-          stage: "business_context",
-          answer: classification.extracted_answer,
-        });
-      }
-
-      await sendAndPersistReply({
-        ownerId,
-        conversationId: conversation.id,
-        leadId: lead.id,
-        to: message.from,
-        body: followupForClassification("business_context", classification),
-      });
-      return { duplicate: false, replied: true, handoff: false, ignored: false };
-    }
-
-    await saveStageAnswer({
-      leadId: lead.id,
-      stage: "business_context",
-      answer: classification.extracted_answer,
-    });
-    await sendAndPersistReply({
-      ownerId,
-      conversationId: conversation.id,
-      leadId: lead.id,
-      to: message.from,
-      body: SECOND_REPLY,
-    });
-    return { duplicate: false, replied: true, handoff: false, ignored: false };
-  }
-
-  if (!sentBodies.has(HANDOFF_REPLY)) {
-    const knownContext = await getStageKnownContext(lead.id, "sales_process");
-    const classification = await understandReply({
-      stage: "sales_process",
-      question: SECOND_REPLY,
-      message: message.body,
-      knownContext,
-    });
-
-    if (
-      classification.status !== "complete" ||
-      !classification.extracted_answer.trim() ||
-      (classification.confidence > 0 && classification.confidence < 0.6)
-    ) {
-      if (
-        classification.status === "incomplete" &&
-        classification.extracted_answer.trim()
-      ) {
-        await saveStageAnswer({
-          leadId: lead.id,
-          stage: "sales_process",
-          answer: classification.extracted_answer,
-        });
-      }
-
-      await sendAndPersistReply({
-        ownerId,
-        conversationId: conversation.id,
-        leadId: lead.id,
-        to: message.from,
-        body: followupForClassification("sales_process", classification),
-      });
-      return { duplicate: false, replied: true, handoff: false, ignored: false };
-    }
-
-    await saveStageAnswer({
-      leadId: lead.id,
-      stage: "sales_process",
-      answer: classification.extracted_answer,
-    });
-    await finishWhatsAppV1Handoff({
+  if (agentResult.handoffRequested) {
+    await finishWhatsAppAgentHandoff({
       ownerId,
       leadId: lead.id,
       previousLeadStatus: lead.status,
       conversationId: conversation.id,
+      agentSummary: agentResult.handoffSummary,
+      handoffReason: agentResult.handoffReason,
     });
-    await sendAndPersistReply({
-      ownerId,
-      conversationId: conversation.id,
-      leadId: lead.id,
-      to: message.from,
-      body: HANDOFF_REPLY,
-    });
+  }
+
+  await sendAndPersistReply({
+    ownerId,
+    conversationId: conversation.id,
+    leadId: lead.id,
+    to: message.from,
+    body: agentResult.reply,
+  });
+
+  if (agentResult.handoffRequested) {
     await notifyAdminOfWhatsAppHandoff({
       leadId: lead.id,
       leadPhone: message.from,
-      leadName: message.senderName,
+      leadName: contact.full_name ?? message.senderName,
     });
-    return { duplicate: false, replied: true, handoff: true, ignored: false };
   }
 
-  return { duplicate: false, replied: false, handoff: false, ignored: false };
+  return {
+    duplicate: false,
+    replied: true,
+    handoff: agentResult.handoffRequested,
+    ignored: false,
+  };
 }
 
 export async function GET(request: Request) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyAdminOfWhatsAppHandoff } from "@/lib/whatsapp/admin-alert";
+import { transcribeWhatsAppAudio } from "@/lib/whatsapp/audio";
 import {
   runWhatsAppSalesAgent,
   type WhatsAppAgentMessage,
@@ -32,11 +33,14 @@ const ACTIVE_LEAD_STATUSES = [
   "revision",
 ] as const;
 
-type IncomingTextMessage = {
+type IncomingWhatsAppMessage = {
   id: string;
   from: string;
   senderName: string | null;
-  body: string;
+  kind: "text" | "audio";
+  body: string | null;
+  mediaId: string | null;
+  mimeType: string | null;
   receivedAt: string;
   phoneNumberId: string | null;
   rawMessage: unknown;
@@ -68,10 +72,10 @@ function timestampToIso(value: unknown) {
   return new Date(seconds * 1000).toISOString();
 }
 
-function extractIncomingTextMessages(payload: unknown): IncomingTextMessage[] {
+function extractIncomingMessages(payload: unknown): IncomingWhatsAppMessage[] {
   const root = asRecord(payload);
   if (!root) return [];
-  const extracted: IncomingTextMessage[] = [];
+  const extracted: IncomingWhatsAppMessage[] = [];
 
   for (const entryValue of asArray(root.entry)) {
     const entry = asRecord(entryValue);
@@ -101,19 +105,47 @@ function extractIncomingTextMessages(payload: unknown): IncomingTextMessage[] {
         const id = asString(message.id);
         const from = asString(message.from);
         const type = asString(message.type);
-        const text = asRecord(message.text);
-        const body = asString(text?.body);
-        if (!id || !from || type !== "text" || !body) continue;
+        if (!id || !from) continue;
 
-        extracted.push({
-          id,
-          from,
-          senderName: contactNames.get(from) ?? null,
-          body,
-          receivedAt: timestampToIso(message.timestamp),
-          phoneNumberId,
-          rawMessage: message,
-        });
+        if (type === "text") {
+          const text = asRecord(message.text);
+          const body = asString(text?.body);
+          if (!body) continue;
+
+          extracted.push({
+            id,
+            from,
+            senderName: contactNames.get(from) ?? null,
+            kind: "text",
+            body,
+            mediaId: null,
+            mimeType: null,
+            receivedAt: timestampToIso(message.timestamp),
+            phoneNumberId,
+            rawMessage: message,
+          });
+          continue;
+        }
+
+        if (type === "audio") {
+          const audio = asRecord(message.audio);
+          const mediaId = asString(audio?.id);
+          const mimeType = asString(audio?.mime_type) || null;
+          if (!mediaId) continue;
+
+          extracted.push({
+            id,
+            from,
+            senderName: contactNames.get(from) ?? null,
+            kind: "audio",
+            body: null,
+            mediaId,
+            mimeType,
+            receivedAt: timestampToIso(message.timestamp),
+            phoneNumberId,
+            rawMessage: message,
+          });
+        }
       }
     }
   }
@@ -381,7 +413,7 @@ async function finishWhatsAppAgentHandoff(args: {
   if (conversationUpdateError) throw conversationUpdateError;
 }
 
-async function processIncomingMessage(message: IncomingTextMessage) {
+async function processIncomingMessage(message: IncomingWhatsAppMessage) {
   const ownerId = requiredEnv("CRM_OWNER_ID");
   const expectedPhoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
 
@@ -407,6 +439,21 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     return { duplicate: true, replied: false, handoff: false, ignored: false };
   }
 
+  let body = message.body?.trim() || "";
+  let transcription: string | null = null;
+  let transcriptionFailed = false;
+
+  if (message.kind === "audio") {
+    try {
+      transcription = await transcribeWhatsAppAudio(message.mediaId!);
+      body = transcription;
+    } catch (error) {
+      transcriptionFailed = true;
+      body = "[Audio recibido; no se pudo transcribir automáticamente]";
+      console.error("WhatsApp audio transcription error", error);
+    }
+  }
+
   const contact = await getOrCreateContact({
     ownerId,
     phone: message.from,
@@ -415,7 +462,7 @@ async function processIncomingMessage(message: IncomingTextMessage) {
   const lead = await getOrCreateLead({
     ownerId,
     contactId: contact.id,
-    originalMessage: message.body,
+    originalMessage: body,
   });
   const conversation = await getOrCreateConversation({
     ownerId,
@@ -430,11 +477,12 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     lead_id: lead.id,
     provider_message_id: message.id,
     direction: "inbound",
-    type: "text",
+    type: message.kind,
     sender_phone: message.from,
     sender_name: message.senderName,
-    body: message.body,
-    processed_text: message.body,
+    body,
+    processed_text: body,
+    transcription,
     raw_payload: message.rawMessage,
     received_at: message.receivedAt,
   });
@@ -462,6 +510,17 @@ async function processIncomingMessage(message: IncomingTextMessage) {
   if (!isWhatsAppSendConfigured()) {
     console.warn("WhatsApp send skipped: outbound credentials are not configured yet");
     return { duplicate: false, replied: false, handoff: false, ignored: false };
+  }
+
+  if (transcriptionFailed) {
+    await sendAndPersistReply({
+      ownerId,
+      conversationId: conversation.id,
+      leadId: lead.id,
+      to: message.from,
+      body: "Sí recibí tu audio 👍 pero no logré transcribirlo bien esta vez. ¿Me lo puedes reenviar o escribir lo principal?",
+    });
+    return { duplicate: false, replied: true, handoff: false, ignored: false };
   }
 
   const agentContext = await getAgentContext({
@@ -544,7 +603,7 @@ export async function POST(request: Request) {
     }
 
     const payload = JSON.parse(rawBody) as unknown;
-    const messages = extractIncomingTextMessages(payload);
+    const messages = extractIncomingMessages(payload);
     if (messages.length === 0) {
       return NextResponse.json({ ok: true, processed: 0 });
     }

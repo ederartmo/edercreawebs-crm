@@ -14,71 +14,56 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const supabase = createClient();
+    const url = new URL(window.location.href);
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const errorDescription =
+      url.searchParams.get("error_description") ?? hash.get("error_description");
 
-    async function prepareRecoverySession() {
-      const supabase = createClient();
-      const url = new URL(window.location.href);
-      const errorDescription = url.searchParams.get("error_description");
-
-      if (errorDescription) {
-        if (!cancelled) {
-          setErrorMessage("El enlace de recuperación es inválido o ya expiró. Solicita uno nuevo.");
-          setState("invalid");
-        }
-        return;
-      }
-
-      const code = url.searchParams.get("code");
-      if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) {
-          if (!cancelled) {
-            setErrorMessage("El enlace de recuperación es inválido o ya expiró. Solicita uno nuevo.");
-            setState("invalid");
-          }
-          return;
-        }
-        window.history.replaceState({}, "", "/reset-password");
-      } else if (window.location.hash) {
-        const hash = new URLSearchParams(window.location.hash.slice(1));
-        const accessToken = hash.get("access_token");
-        const refreshToken = hash.get("refresh_token");
-
-        if (accessToken && refreshToken) {
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          if (error) {
-            if (!cancelled) {
-              setErrorMessage("El enlace de recuperación es inválido o ya expiró. Solicita uno nuevo.");
-              setState("invalid");
-            }
-            return;
-          }
-          window.history.replaceState({}, "", "/reset-password");
-        }
-      }
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session) {
-        if (!cancelled) {
-          setErrorMessage("No hay una sesión de recuperación válida. Solicita un enlace nuevo.");
-          setState("invalid");
-        }
-        return;
-      }
-
-      if (!cancelled) setState("ready");
+    if (errorDescription) {
+      setErrorMessage("El enlace de recuperación es inválido o ya expiró. Solicita uno nuevo.");
+      setState("invalid");
+      return;
     }
 
-    void prepareRecoverySession();
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (cancelled) return;
+
+        if ((event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") && session) {
+          setState("ready");
+          if (window.location.search || window.location.hash) {
+            window.history.replaceState({}, "", "/reset-password");
+          }
+        }
+      },
+    );
+
+    async function verifyRecoverySession() {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+
+      if (cancelled) return;
+
+      if (session && !error) {
+        setState("ready");
+        if (window.location.search || window.location.hash) {
+          window.history.replaceState({}, "", "/reset-password");
+        }
+        return;
+      }
+
+      setErrorMessage("No hay una sesión de recuperación válida. Solicita un enlace nuevo.");
+      setState("invalid");
+    }
+
+    void verifyRecoverySession();
 
     return () => {
       cancelled = true;
+      authListener.subscription.unsubscribe();
     };
   }, []);
 

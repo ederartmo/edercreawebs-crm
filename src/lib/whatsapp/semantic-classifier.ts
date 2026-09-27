@@ -98,6 +98,7 @@ export async function classifyWhatsAppReply(args: {
   stage: WhatsAppQualificationStage;
   question: string;
   message: string;
+  knownContext?: string;
 }) {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
@@ -110,11 +111,11 @@ export async function classifyWhatsAppReply(args: {
     args.stage === "business_context"
       ? [
           "For business_context, a complete answer must provide both: what the business sells/does AND where customers currently come from.",
-          "If only one is present, use status=incomplete and report the missing field as what_sells or lead_source.",
+          "If only one is present across known context plus the latest message, use status=incomplete and report the missing field as what_sells or lead_source.",
         ].join(" ")
       : [
           "For sales_process, a complete answer must describe what happens after a prospect shows interest until a quote, booking, payment, purchase, or next commercial step.",
-          "If that process is not actually described, use incomplete or needs_clarification as appropriate and include sales_process in missing_information.",
+          "If that process is not actually described across known context plus the latest message, use incomplete or needs_clarification as appropriate and include sales_process in missing_information.",
         ].join(" ");
 
   const controller = new AbortController();
@@ -130,24 +131,30 @@ export async function classifyWhatsAppReply(args: {
       signal: controller.signal,
       body: JSON.stringify({
         model,
+        store: false,
         input: [
           {
             role: "system",
             content: [
               "You are a semantic classifier for a Spanish-language sales qualification flow on WhatsApp.",
-              "Your job is ONLY to interpret whether the prospect's latest message answers the bot's current question.",
+              "Your job is ONLY to interpret whether the prospect's latest message, together with any known context from earlier replies in the same stage, answers the bot's current question.",
               "Do not invent facts and do not answer the prospect.",
               "Use needs_clarification when the person indicates confusion or asks what the question means, regardless of wording, spelling, slang, abbreviations, or punctuation.",
               "Use other_question when the person asks something else instead of answering the current question.",
               "Use off_topic for unrelated content.",
               "Use uncertain when intent cannot be determined reliably.",
-              "extracted_answer must contain only facts actually stated by the prospect, rewritten compactly if useful. If there is no usable answer, return an empty string.",
+              "extracted_answer must contain the combined usable facts from known context and the latest prospect message, but only facts the prospect actually stated. If there is no usable answer, return an empty string.",
               stageRequirements,
             ].join(" "),
           },
           {
             role: "user",
-            content: `Stage: ${args.stage}\nBot question: ${args.question}\nProspect message: ${args.message}`,
+            content: [
+              `Stage: ${args.stage}`,
+              `Bot question: ${args.question}`,
+              `Known context from earlier replies: ${args.knownContext?.trim() || "None"}`,
+              `Latest prospect message: ${args.message}`,
+            ].join("\n"),
           },
         ],
         text: {

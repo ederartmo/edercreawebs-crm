@@ -13,6 +13,14 @@ type SendWhatsAppTextResponse = {
   error?: unknown;
 };
 
+export function isWhatsAppSendConfigured() {
+  return Boolean(
+    process.env.WHATSAPP_ACCESS_TOKEN?.trim() &&
+      process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() &&
+      process.env.WHATSAPP_GRAPH_API_VERSION?.trim(),
+  );
+}
+
 export async function sendWhatsAppText(to: string, body: string) {
   const accessToken = requiredEnv("WHATSAPP_ACCESS_TOKEN");
   const phoneNumberId = requiredEnv("WHATSAPP_PHONE_NUMBER_ID");

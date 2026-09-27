@@ -13,8 +13,14 @@ export const dynamic = "force-dynamic";
 const FIRST_REPLY =
   "Hola 😁 Cuéntame un poco de tu negocio: ¿qué vendes y cómo suelen llegarte actualmente tus clientes?";
 
+const CLARIFY_FIRST_REPLY =
+  "Claro 👍 Solo dime dos cosas: qué vende tu negocio y de dónde suelen llegar hoy tus clientes. Por ejemplo: Meta Ads, Instagram, recomendaciones o WhatsApp.";
+
 const SECOND_REPLY =
   "Perfecto. Cuando una persona se interesa, ¿qué suele pasar después hasta que compra, agenda o pide una cotización?";
+
+const CLARIFY_SECOND_REPLY =
+  "Claro 👍 Me refiero a qué haces tú después de que alguien te escribe interesado. Por ejemplo: ¿le mandas precio directo, le pides datos para cotizar, agenda una llamada o paga en línea?";
 
 const HANDOFF_REPLY =
   "Perfecto, con esto ya tengo buen contexto 👍 Se lo dejo preparado a Eder para que continúe contigo personalmente.";
@@ -67,6 +73,40 @@ function asArray(value: unknown): unknown[] {
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isClarificationRequest(value: string) {
+  const normalized = normalizeText(value);
+  if (!normalized) return false;
+
+  if (["como", "como asi", "que", "no se"].includes(normalized)) {
+    return true;
+  }
+
+  const clarificationPhrases = [
+    "no entendi",
+    "no entiendo",
+    "no comprendi",
+    "no comprendo",
+    "a que te refieres",
+    "que quieres decir",
+    "me explicas",
+    "puedes explicar",
+    "explicame",
+    "no me queda claro",
+  ];
+
+  return clarificationPhrases.some((phrase) => normalized.includes(phrase));
 }
 
 function timestampToIso(value: unknown) {
@@ -332,7 +372,11 @@ async function finishWhatsAppV1Handoff(args: {
   let businessAnswer = "Sin respuesta";
   if (firstQuestionIndex >= 0 && secondQuestionIndex > firstQuestionIndex) {
     for (let index = firstQuestionIndex + 1; index < secondQuestionIndex; index += 1) {
-      if (messages[index]?.direction === "inbound" && messages[index]?.body?.trim()) {
+      if (
+        messages[index]?.direction === "inbound" &&
+        messages[index]?.body?.trim() &&
+        !isClarificationRequest(messages[index].body)
+      ) {
         businessAnswer = messages[index].body.trim();
         break;
       }
@@ -342,7 +386,11 @@ async function finishWhatsAppV1Handoff(args: {
   let salesProcessAnswer = "Sin respuesta";
   if (secondQuestionIndex >= 0) {
     for (let index = secondQuestionIndex + 1; index < messages.length; index += 1) {
-      if (messages[index]?.direction === "inbound" && messages[index]?.body?.trim()) {
+      if (
+        messages[index]?.direction === "inbound" &&
+        messages[index]?.body?.trim() &&
+        !isClarificationRequest(messages[index].body)
+      ) {
         salesProcessAnswer = messages[index].body.trim();
         break;
       }
@@ -516,6 +564,17 @@ async function processIncomingMessage(message: IncomingTextMessage) {
   }
 
   if (!sentBodies.has(SECOND_REPLY)) {
+    if (isClarificationRequest(message.body)) {
+      await sendAndPersistReply({
+        ownerId,
+        conversationId: conversation.id,
+        leadId: lead.id,
+        to: message.from,
+        body: CLARIFY_FIRST_REPLY,
+      });
+      return { duplicate: false, replied: true, handoff: false, ignored: false };
+    }
+
     await sendAndPersistReply({
       ownerId,
       conversationId: conversation.id,
@@ -527,6 +586,17 @@ async function processIncomingMessage(message: IncomingTextMessage) {
   }
 
   if (!sentBodies.has(HANDOFF_REPLY)) {
+    if (isClarificationRequest(message.body)) {
+      await sendAndPersistReply({
+        ownerId,
+        conversationId: conversation.id,
+        leadId: lead.id,
+        to: message.from,
+        body: CLARIFY_SECOND_REPLY,
+      });
+      return { duplicate: false, replied: true, handoff: false, ignored: false };
+    }
+
     await finishWhatsAppV1Handoff({
       ownerId,
       leadId: lead.id,

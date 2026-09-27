@@ -100,7 +100,7 @@ function normalizeText(value: string) {
     .trim();
 }
 
-// This remains only as a fallback if the AI classifier is temporarily unavailable.
+// Only a resilience fallback. Normal production interpretation is semantic/AI-based.
 function isObviousClarificationRequest(value: string) {
   const normalized = normalizeText(value);
   if (!normalized) return false;
@@ -144,6 +144,7 @@ async function understandReply(args: {
   stage: WhatsAppQualificationStage;
   question: string;
   message: string;
+  knownContext?: string;
 }) {
   return (
     (await classifyWhatsAppReply(args)) ?? fallbackClassification(args.message)
@@ -196,6 +197,23 @@ async function saveStageAnswer(args: {
     .eq("id", args.leadId);
 
   if (error) throw error;
+}
+
+async function getStageKnownContext(
+  leadId: string,
+  stage: WhatsAppQualificationStage,
+) {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("leads")
+    .select("what_sells,how_sells")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return stage === "business_context"
+    ? data?.what_sells?.trim() || ""
+    : data?.how_sells?.trim() || "";
 }
 
 function timestampToIso(value: unknown) {
@@ -587,10 +605,12 @@ async function processIncomingMessage(message: IncomingTextMessage) {
   }
 
   if (!sentBodies.has(SECOND_REPLY)) {
+    const knownContext = await getStageKnownContext(lead.id, "business_context");
     const classification = await understandReply({
       stage: "business_context",
       question: FIRST_REPLY,
       message: message.body,
+      knownContext,
     });
 
     if (
@@ -598,6 +618,17 @@ async function processIncomingMessage(message: IncomingTextMessage) {
       !classification.extracted_answer.trim() ||
       (classification.confidence > 0 && classification.confidence < 0.6)
     ) {
+      if (
+        classification.status === "incomplete" &&
+        classification.extracted_answer.trim()
+      ) {
+        await saveStageAnswer({
+          leadId: lead.id,
+          stage: "business_context",
+          answer: classification.extracted_answer,
+        });
+      }
+
       await sendAndPersistReply({
         ownerId,
         conversationId: conversation.id,
@@ -624,10 +655,12 @@ async function processIncomingMessage(message: IncomingTextMessage) {
   }
 
   if (!sentBodies.has(HANDOFF_REPLY)) {
+    const knownContext = await getStageKnownContext(lead.id, "sales_process");
     const classification = await understandReply({
       stage: "sales_process",
       question: SECOND_REPLY,
       message: message.body,
+      knownContext,
     });
 
     if (
@@ -635,6 +668,17 @@ async function processIncomingMessage(message: IncomingTextMessage) {
       !classification.extracted_answer.trim() ||
       (classification.confidence > 0 && classification.confidence < 0.6)
     ) {
+      if (
+        classification.status === "incomplete" &&
+        classification.extracted_answer.trim()
+      ) {
+        await saveStageAnswer({
+          leadId: lead.id,
+          stage: "sales_process",
+          answer: classification.extracted_answer,
+        });
+      }
+
       await sendAndPersistReply({
         ownerId,
         conversationId: conversation.id,

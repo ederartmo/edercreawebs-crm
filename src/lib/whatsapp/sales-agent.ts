@@ -1,4 +1,6 @@
+import { after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { enrichBusinessReferenceAsset } from "@/lib/whatsapp/asset-enrichment";
 
 export type WhatsAppAgentMessage = {
   role: "user" | "assistant";
@@ -88,7 +90,7 @@ const AGENT_TOOLS = [
     type: "function",
     name: "mark_assets_requested",
     description:
-      "Mark that the conversation has reached the point where the assistant has offered to make the solution tangible and is asking the prospect for one business link/reference. Call this when you first ask for that link after diagnosing the business.",
+      "Mark that the conversation has reached the point where the assistant has offered to make the solution tangible and is asking the prospect for one business link/reference. Call this when you first ask for that reference after diagnosing the business.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -101,14 +103,15 @@ const AGENT_TOOLS = [
     type: "function",
     name: "save_asset_reference",
     description:
-      "Save ONE business reference link that the prospect provided, without browsing or claiming to have reviewed it. Use for Instagram, Facebook, TikTok, a website, Google Business/Maps, or another useful business URL.",
+      "Save ONE business reference supplied by the prospect without claiming it has already been reviewed. The reference may be a full URL OR a social username/handle when the platform is clear from the conversation. For example, @negocio or negocio can be saved as Instagram when the prospect says it is their Instagram.",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
-        url: {
+        reference: {
           type: "string",
-          description: "The exact business/reference URL supplied by the prospect.",
+          description:
+            "The exact business reference supplied by the prospect: a URL, @handle, or social username when its platform is known.",
         },
         asset_type: {
           type: "string",
@@ -122,7 +125,7 @@ const AGENT_TOOLS = [
           ],
         },
       },
-      required: ["url", "asset_type"],
+      required: ["reference", "asset_type"],
     },
     strict: true,
   },
@@ -143,7 +146,7 @@ const AGENT_TOOLS = [
         reason: {
           type: "string",
           description:
-            "Why human intervention is actually required now, such as prospect_requested_human, negotiation, complaint, legal_fiscal, special_scope, or ready_to_pay.",
+            "Why human intervention is actually required now, such as prospect_requested_human, negotiation, complaint, legal_fiscal, special_scope, formal_quote, or ready_to_pay.",
         },
       },
       required: ["summary", "reason"],
@@ -188,26 +191,30 @@ DESPUÉS DEL DIAGNÓSTICO: NO CORTES LA CONVERSACIÓN
   A) resume el problema en una frase breve;
   B) explica en una frase cómo un sistema web/digital podría ayudar;
   C) ofrece aterrizar algo visual o tangible usando lo que el negocio ya tiene;
-  D) pide UN solo enlace donde mejor se vea el negocio.
-- La idea es "primero lo dulce, luego pedir": primero demuestra que entendiste y muestra el valor de lo que podrías aterrizar; después pide el enlace.
-- Antes o al mismo tiempo que haces esa primera solicitud de enlace, usa mark_assets_requested.
-- Puedes pedir Instagram, Facebook, TikTok, sitio web o Google Business/Maps. Pide solo un enlace, no una lista.
-- Si el prospecto ya dio un enlace anteriormente o el contexto persistente muestra uno guardado, NO vuelvas a pedir redes/enlace.
+  D) pide UNA sola referencia donde mejor se vea el negocio.
+- La idea es "primero lo dulce, luego pedir": primero demuestra que entendiste y muestra el valor de lo que podrías aterrizar; después pide la referencia.
+- Antes o al mismo tiempo que haces esa primera solicitud, usa mark_assets_requested.
+- Puedes pedir Instagram, Facebook, TikTok, sitio web o Google Business/Maps. Pide una sola referencia, no una lista.
+- Si el prospecto ya dio una referencia anteriormente o el contexto persistente muestra una guardada, NO vuelvas a pedirla.
+- Si la persona no tiene el enlace directo pero te da un usuario o handle y queda claro qué plataforma es, NO la obligues a buscar la URL: usa save_asset_reference con ese usuario/handle y el asset_type correcto.
+- Ejemplo: si dice "en Instagram somos edercreawebs" o confirma que "edercreawebs" es su Instagram, guárdalo como referencia de Instagram aunque no incluya https://.
 - Si dice que no tiene redes o página, no te atasques. Pide una alternativa sencilla que sí pueda escribir por WhatsApp, por ejemplo el nombre exacto del negocio o un enlace de Google Business si existe. No hagas una batería de preguntas.
 
-CUANDO RECIBAS UN ENLACE
-- Si el prospecto proporciona una URL útil del negocio, usa save_asset_reference.
-- NO visites, navegues, investigues ni hagas scraping del enlace en esta etapa.
-- NO digas que ya revisaste el perfil, la web, las fotos, el catálogo o su contenido.
+CUANDO RECIBAS UNA REFERENCIA
+- Si el prospecto proporciona una URL útil, @handle o usuario social cuyo tipo está claro, usa save_asset_reference.
+- Guardar la referencia dispara un enriquecimiento público de una sola vez en segundo plano. NO esperes el resultado para contestar este turno.
+- NO digas que ya revisaste el perfil, la web, las fotos, el catálogo o su contenido si el contexto todavía dice enrichment pending/processing.
 - Después de guardarlo, confirma de forma natural algo equivalente a: "Perfecto, ya lo tengo 🙌 Voy a tomarlo como referencia para entender mejor lo que ya tienen y no hacerte repetir información."
-- No hagas handoff solo por haber recibido el activo. El próximo paso de análisis/enriquecimiento se ejecutará aparte.
+- En turnos posteriores, si el contexto muestra enrichment complete, sí puedes usar esa ficha pública resumida para no volver a preguntar datos que ya estén verificados.
+- Si el enriquecimiento fue limitado o falló, no inventes nada y continúa con lo que el prospecto te pueda compartir directamente.
+- No hagas handoff solo por haber recibido el activo.
 
 HERRAMIENTAS
 - Usa save_business_context cuando ya conozcas qué hace/vende el negocio y cómo llegan sus clientes. Puedes volver a usarla después para consolidar información nueva.
 - Usa save_sales_process cuando ya puedas resumir cómo avanza un interesado hacia cotización, agenda, pago, compra o cierre. Puedes volver a usarla después para consolidar información nueva.
-- Usa mark_assets_requested cuando hayas diagnosticado razonablemente el caso y vayas a pedir el primer enlace de referencia.
-- Usa save_asset_reference cuando el prospecto haya dado un enlace real. Guardarlo no significa haberlo investigado.
-- Usa request_human_handoff únicamente cuando de verdad se necesita intervención humana: petición explícita de Eder/persona, queja/conflicto, cuestión legal/fiscal, negociación, descuento, garantía, condiciones especiales de pago, alcance especial que no logras aclarar, función fuera de catálogo o cuando ya quiere pagar.
+- Usa mark_assets_requested cuando hayas diagnosticado razonablemente el caso y vayas a pedir la primera referencia.
+- Usa save_asset_reference cuando el prospecto haya dado una URL, @handle o usuario social claro. Guardarlo no significa que ya fue investigado.
+- Usa request_human_handoff únicamente cuando de verdad se necesita intervención humana: petición explícita de Eder/persona, queja/conflicto, cuestión legal/fiscal, negociación, descuento, garantía, condiciones especiales de pago, cotización formal que todavía requiere aprobación, alcance especial que no logras aclarar, función fuera de catálogo o cuando ya quiere pagar.
 - Después de request_human_handoff, no sigas interrogando. Da una respuesta breve indicando que Eder continuará personalmente.
 
 SEGURIDAD COMERCIAL
@@ -272,7 +279,7 @@ function asNonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function normalizeAssetUrl(value: string) {
+function normalizeHttpUrl(value: string) {
   const cleaned = value.trim().replace(/[),.;!?]+$/g, "");
   if (!cleaned) return null;
 
@@ -284,6 +291,53 @@ function normalizeAssetUrl(value: string) {
   } catch {
     return null;
   }
+}
+
+function socialHandleFromReference(value: string) {
+  let cleaned = value.trim().replace(/[),.;!?]+$/g, "");
+  cleaned = cleaned.replace(/^(instagram|insta|ig|tiktok|tik tok|facebook|fb)\s*[:\-]?\s*/i, "");
+  cleaned = cleaned.replace(/^@/, "").trim();
+  if (!cleaned || /\s/.test(cleaned)) return null;
+  if (!/^[A-Za-z0-9._-]{2,100}$/.test(cleaned)) return null;
+  return cleaned;
+}
+
+function normalizeAssetReference(value: string, assetType: AssetType) {
+  const cleaned = value.trim().replace(/[),.;!?]+$/g, "");
+  if (!cleaned) return null;
+
+  const looksLikeUrl =
+    /^https?:\/\//i.test(cleaned) ||
+    /^(www\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+(?:[/:?#].*)?$/i.test(cleaned);
+
+  if (looksLikeUrl) {
+    const url = normalizeHttpUrl(cleaned);
+    return url ? { url, synthesizedFromHandle: false } : null;
+  }
+
+  const handle = socialHandleFromReference(cleaned);
+  if (!handle) return null;
+
+  if (assetType === "instagram") {
+    return {
+      url: `https://www.instagram.com/${encodeURIComponent(handle)}/`,
+      synthesizedFromHandle: true,
+    };
+  }
+  if (assetType === "tiktok") {
+    return {
+      url: `https://www.tiktok.com/@${encodeURIComponent(handle)}`,
+      synthesizedFromHandle: true,
+    };
+  }
+  if (assetType === "facebook") {
+    return {
+      url: `https://www.facebook.com/${encodeURIComponent(handle)}`,
+      synthesizedFromHandle: true,
+    };
+  }
+
+  return null;
 }
 
 function detectAssetType(url: string, suggested: AssetType): AssetType {
@@ -388,15 +442,19 @@ async function advanceLeadStatus(leadId: string, targetStatus: string, reason: s
 
 async function saveAssetReference(args: {
   leadId: string;
-  url: string;
+  reference: string;
   assetType: AssetType;
 }) {
-  const normalizedUrl = normalizeAssetUrl(args.url);
-  if (!normalizedUrl) {
-    return { ok: false, error: "The supplied URL is not valid" };
+  const normalized = normalizeAssetReference(args.reference, args.assetType);
+  if (!normalized) {
+    return {
+      ok: false,
+      error:
+        "The supplied reference could not be normalized. Ask for a direct URL, or confirm the social platform for the username/handle.",
+    };
   }
 
-  const assetType = detectAssetType(normalizedUrl, args.assetType);
+  const assetType = detectAssetType(normalized.url, args.assetType);
   const supabase = createAdminClient();
   const { data: lead, error: leadError } = await supabase
     .from("leads")
@@ -410,7 +468,7 @@ async function saveAssetReference(args: {
     .from("assets")
     .select("id,external_url,metadata")
     .eq("lead_id", args.leadId)
-    .eq("external_url", normalizedUrl)
+    .eq("external_url", normalized.url)
     .limit(1)
     .maybeSingle();
   if (existingError) throw existingError;
@@ -425,10 +483,12 @@ async function saveAssetReference(args: {
         lead_id: args.leadId,
         category: "business_reference",
         source: "whatsapp_agent_v2",
-        external_url: normalizedUrl,
+        external_url: normalized.url,
         metadata: {
           asset_type: assetType,
           captured_by: "whatsapp_agent_v2",
+          original_reference: args.reference,
+          synthesized_from_handle: normalized.synthesizedFromHandle,
           asset_received_at: now,
           enrichment_status: "pending",
         },
@@ -445,19 +505,66 @@ async function saveAssetReference(args: {
   const stage = await advanceLeadStatus(
     args.leadId,
     "activos_recibidos",
-    "WhatsApp Agent V2 received a business reference link",
+    "WhatsApp Agent V2 received a business reference",
   );
+
+  if (assetId) {
+    const id = assetId;
+    after(async () => {
+      try {
+        await enrichBusinessReferenceAsset(id);
+      } catch (error) {
+        console.error("WhatsApp business-reference enrichment failed", error);
+      }
+    });
+  }
 
   return {
     ok: true,
     saved: existing ? "already_saved" : "asset_reference",
     asset_id: assetId,
     asset_type: assetType,
-    url: normalizedUrl,
+    url: normalized.url,
+    synthesized_from_handle: normalized.synthesizedFromHandle,
     enrichment_status: "pending",
     lead_status: stage.status,
-    note: "Reference saved only; it has not been browsed or analyzed yet",
+    note: "Reference saved. Public enrichment was scheduled in the background.",
   };
+}
+
+function compactEnrichmentProfile(metadata: Record<string, unknown> | null) {
+  if (!metadata) return null;
+  const profile = metadata.enrichment_profile;
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return null;
+  const record = profile as Record<string, unknown>;
+
+  const businessName = asNonEmptyString(record.business_name);
+  const businessType = asNonEmptyString(record.business_type);
+  const location = asNonEmptyString(record.location);
+  const summary = asNonEmptyString(record.summary);
+  const services = Array.isArray(record.services)
+    ? record.services.filter((value): value is string => typeof value === "string").slice(0, 6)
+    : [];
+  const products = Array.isArray(record.products)
+    ? record.products.filter((value): value is string => typeof value === "string").slice(0, 6)
+    : [];
+  const missing = Array.isArray(record.missing_information)
+    ? record.missing_information
+        .filter((value): value is string => typeof value === "string")
+        .slice(0, 6)
+    : [];
+
+  return [
+    businessName ? `name=${businessName}` : null,
+    businessType ? `type=${businessType}` : null,
+    location ? `location=${location}` : null,
+    services.length ? `services=${services.join(", ")}` : null,
+    products.length ? `products=${products.join(", ")}` : null,
+    summary ? `summary=${summary}` : null,
+    missing.length ? `missing=${missing.join(", ")}` : null,
+  ]
+    .filter(Boolean)
+    .join("; ");
 }
 
 async function getPersistentAgentContext(leadId: string) {
@@ -482,7 +589,15 @@ async function getPersistentAgentContext(leadId: string) {
         ? (asset.metadata as Record<string, unknown>)
         : null;
     const type = asNonEmptyString(metadata?.asset_type) ?? "reference";
-    return `${type}: ${asset.external_url}`;
+    const enrichmentStatus = asNonEmptyString(metadata?.enrichment_status) ?? "not_started";
+    const compactProfile = compactEnrichmentProfile(metadata);
+    return [
+      `${type}: ${asset.external_url}`,
+      `enrichment=${enrichmentStatus}`,
+      compactProfile ? `profile={${compactProfile}}` : null,
+    ]
+      .filter(Boolean)
+      .join(" | ");
   });
 
   return {
@@ -516,20 +631,20 @@ async function executeAgentTool(args: {
     const stage = await advanceLeadStatus(
       args.leadId,
       "activos_solicitados",
-      "WhatsApp Agent V2 requested one business reference link",
+      "WhatsApp Agent V2 requested one business reference",
     );
     return { ok: true, lead_status: stage.status };
   }
 
   if (args.call.name === "save_asset_reference") {
-    const url = asNonEmptyString(input.url);
+    const reference = asNonEmptyString(input.reference);
     const assetType = asNonEmptyString(input.asset_type) as AssetType | null;
-    if (!url || !assetType) {
-      return { ok: false, error: "url and asset_type are required" };
+    if (!reference || !assetType) {
+      return { ok: false, error: "reference and asset_type are required" };
     }
     return saveAssetReference({
       leadId: args.leadId,
-      url,
+      reference,
       assetType,
     });
   }
@@ -605,11 +720,12 @@ export async function runWhatsAppSalesAgent(args: {
     `Etapa comercial actual: ${persistentContext.leadStatus}`,
     `Referencias/activos ya guardados: ${
       persistentContext.assets.length > 0
-        ? persistentContext.assets.join(" | ")
+        ? persistentContext.assets.join(" || ")
         : "Ninguno"
     }`,
     "Usa este contexto como hechos previos; no lo repitas mecánicamente al prospecto.",
-    "Si ya existe una referencia/activo guardado, no vuelvas a pedir el mismo tipo de enlace salvo que haya una razón clara.",
+    "Si ya existe una referencia/activo guardado, no vuelvas a pedir la misma referencia salvo que haya una razón clara.",
+    "Solo trata datos de enrichment=complete como información pública ya recuperada. Si está pending/processing/failed, no digas que ya investigaste el activo.",
   ].join("\n");
 
   const input: unknown[] = [

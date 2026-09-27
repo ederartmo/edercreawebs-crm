@@ -12,6 +12,12 @@ export const dynamic = "force-dynamic";
 const FIRST_REPLY =
   "Hola 😁 Cuéntame un poco de tu negocio: ¿qué vendes y cómo suelen llegarte actualmente tus clientes?";
 
+const SECOND_REPLY =
+  "Perfecto. Cuando una persona se interesa, ¿qué suele pasar después hasta que compra, agenda o pide una cotización?";
+
+const HANDOFF_REPLY =
+  "Perfecto, con esto ya tengo buen contexto 👍 Se lo dejo preparado a Eder para que continúe contigo personalmente.";
+
 const ACTIVE_LEAD_STATUSES = [
   "nuevo",
   "diagnostico",
@@ -209,7 +215,7 @@ async function getOrCreateConversation(args: {
   const supabase = createAdminClient();
   const { data: existing, error: findError } = await supabase
     .from("conversations")
-    .select("id,bot_paused")
+    .select("id,bot_paused,unread_count")
     .eq("owner_id", args.ownerId)
     .eq("lead_id", args.leadId)
     .eq("provider", "whatsapp")
@@ -235,7 +241,7 @@ async function getOrCreateConversation(args: {
       last_message_at: args.receivedAt,
       last_inbound_at: args.receivedAt,
     })
-    .select("id,bot_paused")
+    .select("id,bot_paused,unread_count")
     .single();
 
   if (createError || !created) {
@@ -243,6 +249,115 @@ async function getOrCreateConversation(args: {
   }
 
   return created;
+}
+
+async function sendAndPersistReply(args: {
+  ownerId: string;
+  conversationId: string;
+  leadId: string;
+  to: string;
+  body: string;
+}) {
+  const supabase = createAdminClient();
+  const sentAt = new Date().toISOString();
+  const outboundProviderMessageId = await sendWhatsAppText(args.to, args.body);
+
+  const { error: outboundInsertError } = await supabase.from("messages").insert({
+    owner_id: args.ownerId,
+    conversation_id: args.conversationId,
+    lead_id: args.leadId,
+    provider_message_id: outboundProviderMessageId,
+    direction: "outbound",
+    type: "text",
+    sender_name: "Eder Crea Webs",
+    body: args.body,
+    processed_text: args.body,
+    final_reply: args.body,
+    review_status: "not_required",
+    sent_at: sentAt,
+  });
+
+  if (outboundInsertError) throw outboundInsertError;
+
+  const { error: conversationUpdateError } = await supabase
+    .from("conversations")
+    .update({
+      last_message_at: sentAt,
+      last_outbound_at: sentAt,
+    })
+    .eq("id", args.conversationId);
+
+  if (conversationUpdateError) throw conversationUpdateError;
+}
+
+async function finishWhatsAppV1Handoff(args: {
+  ownerId: string;
+  leadId: string;
+  previousLeadStatus: string;
+  conversationId: string;
+}) {
+  const supabase = createAdminClient();
+  const { data: inboundMessages, error: inboundError } = await supabase
+    .from("messages")
+    .select("body,created_at")
+    .eq("conversation_id", args.conversationId)
+    .eq("direction", "inbound")
+    .order("created_at", { ascending: true })
+    .limit(3);
+
+  if (inboundError) throw inboundError;
+
+  const initialMessage = inboundMessages?.[0]?.body?.trim() || "Sin mensaje inicial";
+  const businessAnswer = inboundMessages?.[1]?.body?.trim() || "Sin respuesta";
+  const salesProcessAnswer = inboundMessages?.[2]?.body?.trim() || "Sin respuesta";
+  const now = new Date().toISOString();
+  const summary = [
+    "WhatsApp V1 completado",
+    `Mensaje inicial: ${initialMessage}`,
+    `Negocio y cómo llegan clientes: ${businessAnswer}`,
+    `Qué pasa después hasta compra, agenda o cotización: ${salesProcessAnswer}`,
+    "Estado: listo para seguimiento humano.",
+  ].join("\n");
+
+  const { error: leadUpdateError } = await supabase
+    .from("leads")
+    .update({
+      status: "calificado",
+      what_sells: businessAnswer,
+      how_sells: salesProcessAnswer,
+      human_required: true,
+      human_reason: "whatsapp_v1_ready_for_handoff",
+      conversation_summary: summary,
+      updated_at: now,
+    })
+    .eq("id", args.leadId);
+
+  if (leadUpdateError) throw leadUpdateError;
+
+  if (args.previousLeadStatus !== "calificado") {
+    const { error: historyError } = await supabase
+      .from("lead_status_history")
+      .insert({
+        owner_id: args.ownerId,
+        lead_id: args.leadId,
+        from_status: args.previousLeadStatus,
+        to_status: "calificado",
+        changed_by_type: "system",
+        reason: "WhatsApp V1 completed; ready for human handoff",
+      });
+
+    if (historyError) throw historyError;
+  }
+
+  const { error: conversationUpdateError } = await supabase
+    .from("conversations")
+    .update({
+      bot_paused: true,
+      updated_at: now,
+    })
+    .eq("id", args.conversationId);
+
+  if (conversationUpdateError) throw conversationUpdateError;
 }
 
 async function processIncomingMessage(message: IncomingTextMessage) {
@@ -256,7 +371,7 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     .maybeSingle();
 
   if (duplicateError) throw duplicateError;
-  if (duplicate) return { duplicate: true, replied: false };
+  if (duplicate) return { duplicate: true, replied: false, handoff: false };
 
   const contact = await getOrCreateContact({
     ownerId,
@@ -275,10 +390,11 @@ async function processIncomingMessage(message: IncomingTextMessage) {
     receivedAt: message.receivedAt,
   });
 
-  const { count: previousMessageCount, error: countError } = await supabase
+  const { count: previousInboundCount, error: countError } = await supabase
     .from("messages")
     .select("id", { count: "exact", head: true })
-    .eq("conversation_id", conversation.id);
+    .eq("conversation_id", conversation.id)
+    .eq("direction", "inbound");
 
   if (countError) throw countError;
 
@@ -299,65 +415,76 @@ async function processIncomingMessage(message: IncomingTextMessage) {
 
   if (insertError) {
     if (insertError.code === "23505") {
-      return { duplicate: true, replied: false };
+      return { duplicate: true, replied: false, handoff: false };
     }
     throw insertError;
   }
 
-  await supabase
+  const { error: conversationUpdateError } = await supabase
     .from("conversations")
     .update({
       last_message_at: message.receivedAt,
       last_inbound_at: message.receivedAt,
-      unread_count: (previousMessageCount ?? 0) + 1,
+      unread_count: (conversation.unread_count ?? 0) + 1,
     })
     .eq("id", conversation.id);
 
-  const isFirstConversationMessage = (previousMessageCount ?? 0) === 0;
-  if (!isFirstConversationMessage || conversation.bot_paused) {
-    return { duplicate: false, replied: false };
+  if (conversationUpdateError) throw conversationUpdateError;
+
+  if (conversation.bot_paused) {
+    return { duplicate: false, replied: false, handoff: false };
   }
 
-  // Business verification can delay access to a permanent WhatsApp token.
-  // Receive-only mode lets us validate Meta -> webhook -> Supabase now and
-  // automatically starts replying once the send credentials are configured.
+  // If outbound credentials are still unavailable, keep receiving and storing
+  // messages without failing the webhook. Once configured, replies start
+  // automatically on the next eligible message.
   if (!isWhatsAppSendConfigured()) {
     console.warn("WhatsApp send skipped: outbound credentials are not configured yet");
-    return { duplicate: false, replied: false };
+    return { duplicate: false, replied: false, handoff: false };
   }
 
-  const sentAt = new Date().toISOString();
-  const outboundProviderMessageId = await sendWhatsAppText(
-    message.from,
-    FIRST_REPLY,
-  );
+  const inboundStep = previousInboundCount ?? 0;
 
-  const { error: outboundInsertError } = await supabase.from("messages").insert({
-    owner_id: ownerId,
-    conversation_id: conversation.id,
-    lead_id: lead.id,
-    provider_message_id: outboundProviderMessageId,
-    direction: "outbound",
-    type: "text",
-    sender_name: "Eder Crea Webs",
-    body: FIRST_REPLY,
-    processed_text: FIRST_REPLY,
-    final_reply: FIRST_REPLY,
-    review_status: "not_required",
-    sent_at: sentAt,
-  });
+  if (inboundStep === 0) {
+    await sendAndPersistReply({
+      ownerId,
+      conversationId: conversation.id,
+      leadId: lead.id,
+      to: message.from,
+      body: FIRST_REPLY,
+    });
+    return { duplicate: false, replied: true, handoff: false };
+  }
 
-  if (outboundInsertError) throw outboundInsertError;
+  if (inboundStep === 1) {
+    await sendAndPersistReply({
+      ownerId,
+      conversationId: conversation.id,
+      leadId: lead.id,
+      to: message.from,
+      body: SECOND_REPLY,
+    });
+    return { duplicate: false, replied: true, handoff: false };
+  }
 
-  await supabase
-    .from("conversations")
-    .update({
-      last_message_at: sentAt,
-      last_outbound_at: sentAt,
-    })
-    .eq("id", conversation.id);
+  if (inboundStep === 2) {
+    await finishWhatsAppV1Handoff({
+      ownerId,
+      leadId: lead.id,
+      previousLeadStatus: lead.status,
+      conversationId: conversation.id,
+    });
+    await sendAndPersistReply({
+      ownerId,
+      conversationId: conversation.id,
+      leadId: lead.id,
+      to: message.from,
+      body: HANDOFF_REPLY,
+    });
+    return { duplicate: false, replied: true, handoff: true };
+  }
 
-  return { duplicate: false, replied: true };
+  return { duplicate: false, replied: false, handoff: false };
 }
 
 export async function GET(request: Request) {
@@ -406,6 +533,7 @@ export async function POST(request: Request) {
       ok: true,
       processed: messages.length,
       replied: results.filter((result) => result.replied).length,
+      handoffs: results.filter((result) => result.handoff).length,
       duplicates: results.filter((result) => result.duplicate).length,
     });
   } catch (error) {

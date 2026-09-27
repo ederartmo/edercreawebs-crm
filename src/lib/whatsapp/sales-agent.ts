@@ -45,6 +45,14 @@ type ToolCall = {
   arguments: string;
 };
 
+type AssetType =
+  | "instagram"
+  | "facebook"
+  | "tiktok"
+  | "website"
+  | "google_business"
+  | "other";
+
 const AGENT_TOOLS = [
   {
     type: "function",
@@ -78,9 +86,51 @@ const AGENT_TOOLS = [
   },
   {
     type: "function",
+    name: "mark_assets_requested",
+    description:
+      "Mark that the conversation has reached the point where the assistant has offered to make the solution tangible and is asking the prospect for one business link/reference. Call this when you first ask for that link after diagnosing the business.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {},
+      required: [],
+    },
+    strict: true,
+  },
+  {
+    type: "function",
+    name: "save_asset_reference",
+    description:
+      "Save ONE business reference link that the prospect provided, without browsing or claiming to have reviewed it. Use for Instagram, Facebook, TikTok, a website, Google Business/Maps, or another useful business URL.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        url: {
+          type: "string",
+          description: "The exact business/reference URL supplied by the prospect.",
+        },
+        asset_type: {
+          type: "string",
+          enum: [
+            "instagram",
+            "facebook",
+            "tiktok",
+            "website",
+            "google_business",
+            "other",
+          ],
+        },
+      },
+      required: ["url", "asset_type"],
+    },
+    strict: true,
+  },
+  {
+    type: "function",
     name: "request_human_handoff",
     description:
-      "Request that Eder personally continue the conversation. Use when enough commercial context has been gathered for Eder to take over, or immediately when the prospect explicitly asks to speak with Eder/a person.",
+      "Request that Eder personally continue ONLY when human intervention is actually required: the prospect explicitly asks for Eder/a person, there is a complaint/conflict, legal or fiscal uncertainty, negotiation/discount/guarantee/special payment terms, unclear or unusual scope after a reasonable attempt, a special function outside the known offer, or the prospect is ready to make a payment. Do NOT use merely because enough diagnostic context has been gathered.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -93,7 +143,7 @@ const AGENT_TOOLS = [
         reason: {
           type: "string",
           description:
-            "Why handoff is appropriate now, for example enough_context or prospect_requested_human.",
+            "Why human intervention is actually required now, such as prospect_requested_human, negotiation, complaint, legal_fiscal, special_scope, or ready_to_pay.",
         },
       },
       required: ["summary", "reason"],
@@ -112,7 +162,7 @@ IDENTIDAD Y OFERTA
 - Eder suele auditar primero cómo funciona hoy el negocio y después propone la herramienta adecuada.
 - No asumas que el prospecto sabe cuál es su problema técnico. Dedúcelo a partir de cómo vende y opera.
 - No prometas funciones, integraciones, tiempos ni precios que no estén confirmados.
-- No negocies ni inventes descuentos. Si preguntan por precio sin suficiente alcance, explica brevemente que depende del sistema necesario y sigue entendiendo el caso; Eder puede cerrar la parte comercial final.
+- No negocies ni inventes descuentos. En esta etapa tampoco envíes cotizaciones ni precios finales por tu cuenta.
 
 CÓMO CONVERSAR
 - Habla en español natural, cálido y directo, como WhatsApp. Nada de tono de call center, encuesta o robot.
@@ -121,7 +171,6 @@ CÓMO CONVERSAR
 - Si el prospecto hace una pregunta, respóndela cuando puedas y luego continúa naturalmente; no lo fuerces a volver al guion.
 - Si algo es ambiguo, pregunta justo lo necesario. No enumeres campos faltantes como formulario.
 - Una pregunta citada dentro de una explicación (por ejemplo "yo les pregunto qué venden") es parte de su proceso, no significa que el prospecto te esté preguntando a ti.
-- Si comparte sitio web, redes sociales o enlaces, reconoce que son material útil para el diagnóstico. No finjas haberlos abierto si no tienes una herramienta para hacerlo.
 - Nunca digas que eres Eder. Eres su asistente.
 
 QUÉ NECESITAS ENTENDER
@@ -129,15 +178,36 @@ Busca, de forma conversacional y sin orden obligatorio:
 1) qué vende u ofrece el negocio;
 2) cómo suelen llegar hoy sus prospectos/clientes;
 3) qué pasa desde que alguien se interesa hasta que compra, agenda, cotiza o se pierde;
-4) fricciones, trabajo manual, cuellos de botella u objetivos que aparezcan naturalmente.
+4) cuál parece ser la fricción, cuello de botella u objetivo principal.
 
-No necesitas obtener una respuesta perfecta ni todos los detalles posibles. Cuando ya entiendas suficientemente el negocio, adquisición y proceso comercial como para que Eder pueda entrar con contexto real, prepara el handoff.
+No necesitas obtener una respuesta perfecta ni todos los detalles posibles. El objetivo es entender lo suficiente para avanzar la venta, no para interrogar.
+
+DESPUÉS DEL DIAGNÓSTICO: NO CORTES LA CONVERSACIÓN
+- Tener suficiente contexto NO es motivo de handoff.
+- Cuando ya entiendas razonablemente qué vende, cómo vende y cuál es la fricción principal, haz una transición de valor:
+  A) resume el problema en una frase breve;
+  B) explica en una frase cómo un sistema web/digital podría ayudar;
+  C) ofrece aterrizar algo visual o tangible usando lo que el negocio ya tiene;
+  D) pide UN solo enlace donde mejor se vea el negocio.
+- La idea es "primero lo dulce, luego pedir": primero demuestra que entendiste y muestra el valor de lo que podrías aterrizar; después pide el enlace.
+- Antes o al mismo tiempo que haces esa primera solicitud de enlace, usa mark_assets_requested.
+- Puedes pedir Instagram, Facebook, TikTok, sitio web o Google Business/Maps. Pide solo un enlace, no una lista.
+- Si el prospecto ya dio un enlace anteriormente o el contexto persistente muestra uno guardado, NO vuelvas a pedir redes/enlace.
+- Si dice que no tiene redes o página, no te atasques. Pide una alternativa sencilla que sí pueda escribir por WhatsApp, por ejemplo el nombre exacto del negocio o un enlace de Google Business si existe. No hagas una batería de preguntas.
+
+CUANDO RECIBAS UN ENLACE
+- Si el prospecto proporciona una URL útil del negocio, usa save_asset_reference.
+- NO visites, navegues, investigues ni hagas scraping del enlace en esta etapa.
+- NO digas que ya revisaste el perfil, la web, las fotos, el catálogo o su contenido.
+- Después de guardarlo, confirma de forma natural algo equivalente a: "Perfecto, ya lo tengo 🙌 Voy a tomarlo como referencia para entender mejor lo que ya tienen y no hacerte repetir información."
+- No hagas handoff solo por haber recibido el activo. El próximo paso de análisis/enriquecimiento se ejecutará aparte.
 
 HERRAMIENTAS
 - Usa save_business_context cuando ya conozcas qué hace/vende el negocio y cómo llegan sus clientes. Puedes volver a usarla después para consolidar información nueva.
 - Usa save_sales_process cuando ya puedas resumir cómo avanza un interesado hacia cotización, agenda, pago, compra o cierre. Puedes volver a usarla después para consolidar información nueva.
-- Antes de solicitar handoff por contexto suficiente, procura haber guardado ambos resúmenes si la conversación los contiene.
-- Usa request_human_handoff cuando haya contexto suficiente para que Eder continúe personalmente o si el prospecto pide hablar con Eder/una persona.
+- Usa mark_assets_requested cuando hayas diagnosticado razonablemente el caso y vayas a pedir el primer enlace de referencia.
+- Usa save_asset_reference cuando el prospecto haya dado un enlace real. Guardarlo no significa haberlo investigado.
+- Usa request_human_handoff únicamente cuando de verdad se necesita intervención humana: petición explícita de Eder/persona, queja/conflicto, cuestión legal/fiscal, negociación, descuento, garantía, condiciones especiales de pago, alcance especial que no logras aclarar, función fuera de catálogo o cuando ya quiere pagar.
 - Después de request_human_handoff, no sigas interrogando. Da una respuesta breve indicando que Eder continuará personalmente.
 
 SEGURIDAD COMERCIAL
@@ -202,13 +272,223 @@ function asNonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-async function saveLeadField(leadId: string, field: "what_sells" | "how_sells", value: string) {
+function normalizeAssetUrl(value: string) {
+  const cleaned = value.trim().replace(/[),.;!?]+$/g, "");
+  if (!cleaned) return null;
+
+  const withProtocol = /^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned}`;
+  try {
+    const parsed = new URL(withProtocol);
+    if (!parsed.hostname || !["http:", "https:"].includes(parsed.protocol)) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function detectAssetType(url: string, suggested: AssetType): AssetType {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    if (hostname === "instagram.com" || hostname.endsWith(".instagram.com")) {
+      return "instagram";
+    }
+    if (
+      hostname === "facebook.com" ||
+      hostname.endsWith(".facebook.com") ||
+      hostname === "fb.com" ||
+      hostname.endsWith(".fb.com")
+    ) {
+      return "facebook";
+    }
+    if (hostname === "tiktok.com" || hostname.endsWith(".tiktok.com")) {
+      return "tiktok";
+    }
+    if (
+      hostname === "g.page" ||
+      hostname.endsWith(".g.page") ||
+      hostname === "maps.app.goo.gl" ||
+      hostname.endsWith(".google.com") ||
+      hostname === "google.com"
+    ) {
+      return "google_business";
+    }
+    return suggested === "other" ? "website" : suggested;
+  } catch {
+    return suggested;
+  }
+}
+
+async function saveLeadField(
+  leadId: string,
+  field: "what_sells" | "how_sells",
+  value: string,
+) {
   const supabase = createAdminClient();
   const { error } = await supabase
     .from("leads")
     .update({ [field]: value, updated_at: new Date().toISOString() })
     .eq("id", leadId);
   if (error) throw error;
+}
+
+const STATUS_RANK: Record<string, number> = {
+  nuevo: 0,
+  diagnostico: 1,
+  calificado: 2,
+  no_listo: 2,
+  activos_solicitados: 3,
+  activos_recibidos: 4,
+  propuesta_visual: 5,
+  cotizacion_pendiente_aprobacion: 6,
+  cotizacion_enviada: 7,
+  seguimiento: 8,
+  anticipo_programado: 9,
+  anticipo_recibido: 10,
+  onboarding: 11,
+  en_desarrollo: 12,
+  revision: 13,
+};
+
+async function advanceLeadStatus(leadId: string, targetStatus: string, reason: string) {
+  const supabase = createAdminClient();
+  const { data: lead, error: leadError } = await supabase
+    .from("leads")
+    .select("id,owner_id,status")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (leadError) throw leadError;
+  if (!lead) throw new Error("Lead not found while advancing WhatsApp asset stage");
+
+  const currentRank = STATUS_RANK[lead.status] ?? -1;
+  const targetRank = STATUS_RANK[targetStatus] ?? -1;
+  if (currentRank >= targetRank || targetRank < 0) {
+    return { changed: false, status: lead.status };
+  }
+
+  const now = new Date().toISOString();
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({ status: targetStatus, updated_at: now })
+    .eq("id", leadId);
+  if (updateError) throw updateError;
+
+  const { error: historyError } = await supabase.from("lead_status_history").insert({
+    owner_id: lead.owner_id,
+    lead_id: leadId,
+    from_status: lead.status,
+    to_status: targetStatus,
+    changed_by_type: "system",
+    reason,
+  });
+  if (historyError) throw historyError;
+
+  return { changed: true, status: targetStatus };
+}
+
+async function saveAssetReference(args: {
+  leadId: string;
+  url: string;
+  assetType: AssetType;
+}) {
+  const normalizedUrl = normalizeAssetUrl(args.url);
+  if (!normalizedUrl) {
+    return { ok: false, error: "The supplied URL is not valid" };
+  }
+
+  const assetType = detectAssetType(normalizedUrl, args.assetType);
+  const supabase = createAdminClient();
+  const { data: lead, error: leadError } = await supabase
+    .from("leads")
+    .select("owner_id")
+    .eq("id", args.leadId)
+    .maybeSingle();
+  if (leadError) throw leadError;
+  if (!lead) throw new Error("Lead not found while saving WhatsApp asset reference");
+
+  const { data: existing, error: existingError } = await supabase
+    .from("assets")
+    .select("id,external_url,metadata")
+    .eq("lead_id", args.leadId)
+    .eq("external_url", normalizedUrl)
+    .limit(1)
+    .maybeSingle();
+  if (existingError) throw existingError;
+
+  let assetId = existing?.id ?? null;
+  if (!existing) {
+    const now = new Date().toISOString();
+    const { data: created, error: createError } = await supabase
+      .from("assets")
+      .insert({
+        owner_id: lead.owner_id,
+        lead_id: args.leadId,
+        category: "business_reference",
+        source: "whatsapp_agent_v2",
+        external_url: normalizedUrl,
+        metadata: {
+          asset_type: assetType,
+          captured_by: "whatsapp_agent_v2",
+          asset_received_at: now,
+          enrichment_status: "pending",
+        },
+        is_client_facing: false,
+      })
+      .select("id")
+      .single();
+    if (createError || !created) {
+      throw createError ?? new Error("Could not save WhatsApp asset reference");
+    }
+    assetId = created.id;
+  }
+
+  const stage = await advanceLeadStatus(
+    args.leadId,
+    "activos_recibidos",
+    "WhatsApp Agent V2 received a business reference link",
+  );
+
+  return {
+    ok: true,
+    saved: existing ? "already_saved" : "asset_reference",
+    asset_id: assetId,
+    asset_type: assetType,
+    url: normalizedUrl,
+    enrichment_status: "pending",
+    lead_status: stage.status,
+    note: "Reference saved only; it has not been browsed or analyzed yet",
+  };
+}
+
+async function getPersistentAgentContext(leadId: string) {
+  const supabase = createAdminClient();
+  const [leadResult, assetsResult] = await Promise.all([
+    supabase.from("leads").select("status").eq("id", leadId).maybeSingle(),
+    supabase
+      .from("assets")
+      .select("external_url,metadata,created_at")
+      .eq("lead_id", leadId)
+      .not("external_url", "is", null)
+      .order("created_at", { ascending: true })
+      .limit(10),
+  ]);
+
+  if (leadResult.error) throw leadResult.error;
+  if (assetsResult.error) throw assetsResult.error;
+
+  const assets = (assetsResult.data ?? []).map((asset) => {
+    const metadata =
+      asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata)
+        ? (asset.metadata as Record<string, unknown>)
+        : null;
+    const type = asNonEmptyString(metadata?.asset_type) ?? "reference";
+    return `${type}: ${asset.external_url}`;
+  });
+
+  return {
+    leadStatus: leadResult.data?.status ?? "unknown",
+    assets,
+  };
 }
 
 async function executeAgentTool(args: {
@@ -230,6 +510,28 @@ async function executeAgentTool(args: {
     if (!summary) return { ok: false, error: "summary is required" };
     await saveLeadField(args.leadId, "how_sells", summary);
     return { ok: true, saved: "sales_process" };
+  }
+
+  if (args.call.name === "mark_assets_requested") {
+    const stage = await advanceLeadStatus(
+      args.leadId,
+      "activos_solicitados",
+      "WhatsApp Agent V2 requested one business reference link",
+    );
+    return { ok: true, lead_status: stage.status };
+  }
+
+  if (args.call.name === "save_asset_reference") {
+    const url = asNonEmptyString(input.url);
+    const assetType = asNonEmptyString(input.asset_type) as AssetType | null;
+    if (!url || !assetType) {
+      return { ok: false, error: "url and asset_type are required" };
+    }
+    return saveAssetReference({
+      leadId: args.leadId,
+      url,
+      assetType,
+    });
   }
 
   if (args.call.name === "request_human_handoff") {
@@ -293,13 +595,21 @@ export async function runWhatsAppSalesAgent(args: {
   let handoffSummary: string | null = null;
   let handoffReason: string | null = null;
 
+  const persistentContext = await getPersistentAgentContext(args.lead.leadId);
   const contextHeader = [
     "Contexto estructurado ya guardado en CRM (puede estar vacío):",
     `Nombre: ${args.lead.contactName ?? "No disponible"}`,
     `Mensaje inicial: ${args.lead.originalMessage ?? "No disponible"}`,
     `Negocio/adquisición guardado: ${args.lead.whatSells ?? "Pendiente"}`,
     `Proceso comercial guardado: ${args.lead.howSells ?? "Pendiente"}`,
+    `Etapa comercial actual: ${persistentContext.leadStatus}`,
+    `Referencias/activos ya guardados: ${
+      persistentContext.assets.length > 0
+        ? persistentContext.assets.join(" | ")
+        : "Ninguno"
+    }`,
     "Usa este contexto como hechos previos; no lo repitas mecánicamente al prospecto.",
+    "Si ya existe una referencia/activo guardado, no vuelvas a pedir el mismo tipo de enlace salvo que haya una razón clara.",
   ].join("\n");
 
   const input: unknown[] = [

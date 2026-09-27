@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  isWhatsAppSendConfigured,
   sendWhatsAppText,
   verifyMetaWebhookSignature,
 } from "@/lib/whatsapp/cloud";
@@ -314,6 +315,14 @@ async function processIncomingMessage(message: IncomingTextMessage) {
 
   const isFirstConversationMessage = (previousMessageCount ?? 0) === 0;
   if (!isFirstConversationMessage || conversation.bot_paused) {
+    return { duplicate: false, replied: false };
+  }
+
+  // Business verification can delay access to a permanent WhatsApp token.
+  // Receive-only mode lets us validate Meta -> webhook -> Supabase now and
+  // automatically starts replying once the send credentials are configured.
+  if (!isWhatsAppSendConfigured()) {
+    console.warn("WhatsApp send skipped: outbound credentials are not configured yet");
     return { duplicate: false, replied: false };
   }
 

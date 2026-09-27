@@ -94,16 +94,35 @@ function isClassification(value: unknown): value is WhatsAppReplyClassification 
   );
 }
 
+function unavailableClassification(
+  stage: WhatsAppQualificationStage,
+  reason: string,
+): WhatsAppReplyClassification {
+  return {
+    status: "uncertain",
+    extracted_answer: "",
+    missing_information:
+      stage === "business_context"
+        ? ["what_sells", "lead_source"]
+        : ["sales_process"],
+    confidence: 0,
+    reason,
+  };
+}
+
 export async function classifyWhatsAppReply(args: {
   stage: WhatsAppQualificationStage;
   question: string;
   message: string;
   knownContext?: string;
-}) {
+}): Promise<WhatsAppReplyClassification> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
     console.warn("WhatsApp semantic classifier skipped: OPENAI_API_KEY is not configured");
-    return null;
+    return unavailableClassification(
+      args.stage,
+      "OPENAI_API_KEY is not configured; classification was not attempted",
+    );
   }
 
   const model = process.env.WHATSAPP_CLASSIFIER_MODEL?.trim() || "gpt-4o-mini";
@@ -173,26 +192,38 @@ export async function classifyWhatsAppReply(args: {
       console.error(
         `WhatsApp semantic classifier failed (${response.status}): ${detail.slice(0, 500)}`,
       );
-      return null;
+      return unavailableClassification(
+        args.stage,
+        `OpenAI classifier request failed with HTTP ${response.status}`,
+      );
     }
 
     const payload = (await response.json()) as OpenAIResponse;
     const outputText = getOutputText(payload);
     if (!outputText) {
       console.error("WhatsApp semantic classifier returned no output text");
-      return null;
+      return unavailableClassification(
+        args.stage,
+        "OpenAI classifier returned no output text",
+      );
     }
 
     const parsed = JSON.parse(outputText) as unknown;
     if (!isClassification(parsed)) {
       console.error("WhatsApp semantic classifier returned an invalid shape");
-      return null;
+      return unavailableClassification(
+        args.stage,
+        "OpenAI classifier returned an invalid structured response",
+      );
     }
 
     return parsed;
   } catch (error) {
     console.error("WhatsApp semantic classifier error", error);
-    return null;
+    return unavailableClassification(
+      args.stage,
+      "OpenAI classifier request threw or timed out",
+    );
   } finally {
     clearTimeout(timeout);
   }

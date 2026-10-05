@@ -187,7 +187,7 @@ test("fresh and already-complete enrichment keep complete when proposal generati
     const enrichment = load("src/lib/whatsapp/asset-enrichment.ts", {
       "@/lib/supabase/admin": { createAdminClient: () => db },
       "@/lib/whatsapp/proposal-prep": api,
-    }, { OPENAI_API_KEY: "local-test-placeholder" }, async () => ({ ok: true, json: async () => ({ output_text: ++calls === 1 ? "Verified notes" : '{"summary":"Asesoría","brand_colors":[]}' }) }));
+    }, { OPENAI_API_KEY: "local-test-placeholder", WHATSAPP_PROPOSAL_PREP_ENABLED: "true" }, async () => ({ ok: true, json: async () => ({ output_text: ++calls === 1 ? "Verified notes" : '{"summary":"Asesoría","brand_colors":[]}' }) }));
     const result = await enrichment.enrichBusinessReferenceAsset("source");
     assert.equal(result.ok, true); assert.equal(result.proposalPrep.status, "failed");
     assert.equal(result.proposalPrep.retryable, true);
@@ -211,6 +211,8 @@ test("saved Instagram remains in next-turn context while pending/processing; onl
     const db = database(); db.tables.assets = [];
     const scheduled = [], requests = [];
     const agent = load("src/lib/whatsapp/sales-agent.ts", {
+      "@/lib/intake/domain": load("src/lib/intake/domain.ts", {}),
+      "@/lib/intake/service": { getLeadIntake: async () => load("src/lib/intake/domain.ts", {}).evaluateIntakeReadiness({ what_sells: "Asesor?a", how_sells: "WhatsApp" }, db.tables.assets.length > 0) },
       "next/server": { after: callback => scheduled.push(callback) },
       "@/lib/supabase/admin": { createAdminClient: () => db },
       "@/lib/whatsapp/asset-enrichment": { enrichBusinessReferenceAsset: async () => { throw Error("Background must not run in this test"); } },

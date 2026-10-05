@@ -1,3 +1,6 @@
+import { captureWhatsAppReferral } from "@/lib/intake/domain";
+import { resolveIntakeContinuation, handoffReadyIntake, saveIntakeAnswer } from "@/lib/intake/service";
+import { extractContinuationCode, redactContinuationCode } from "@/lib/intake/tokens";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyAdminOfWhatsAppHandoff } from "@/lib/whatsapp/admin-alert";
@@ -358,11 +361,14 @@ async function getAgentContext(args: {
 async function finishWhatsAppAgentHandoff(args: {
   ownerId: string;
   leadId: string;
-  previousLeadStatus: string;
   conversationId: string;
   agentSummary: string | null;
   handoffReason: string | null;
 }) {
+  if (args.handoffReason === "intake_v1_ready_for_quote") {
+    await handoffReadyIntake(args.leadId, args.conversationId);
+    return;
+  }
   const supabase = createAdminClient();
   const { data: leadData, error: leadReadError } = await supabase
     .from("leads")
@@ -385,7 +391,7 @@ async function finishWhatsAppAgentHandoff(args: {
   const { error: leadUpdateError } = await supabase
     .from("leads")
     .update({
-      status: "calificado",
+      bot_mode: "paused",
       human_required: true,
       human_reason: "whatsapp_agent_v2_ready_for_handoff",
       conversation_summary: summary,
@@ -393,18 +399,6 @@ async function finishWhatsAppAgentHandoff(args: {
     })
     .eq("id", args.leadId);
   if (leadUpdateError) throw leadUpdateError;
-
-  if (args.previousLeadStatus !== "calificado") {
-    const { error: historyError } = await supabase.from("lead_status_history").insert({
-      owner_id: args.ownerId,
-      lead_id: args.leadId,
-      from_status: args.previousLeadStatus,
-      to_status: "calificado",
-      changed_by_type: "system",
-      reason: "WhatsApp Agent V2 requested human handoff",
-    });
-    if (historyError) throw historyError;
-  }
 
   const { error: conversationUpdateError } = await supabase
     .from("conversations")
@@ -454,16 +448,29 @@ async function processIncomingMessage(message: IncomingWhatsAppMessage) {
     }
   }
 
+  const continuation = extractContinuationCode(body);
+  body = redactContinuationCode(body);
+  if (transcription) transcription = redactContinuationCode(transcription);
+  // Resolve atomically before get-or-create: an ECW code may identify a web-only lead.
+  const continuedLeadId = continuation ? await resolveIntakeContinuation(continuation, message.from) : null;
+  if (continuation && !continuedLeadId) {
+    if (isWhatsAppSendConfigured()) await sendWhatsAppText(message.from, "No pude recuperar esa sesión. Puedes obtener un nuevo código desde el onboarding web para continuar con tu proyecto.");
+    return { duplicate: false, replied: isWhatsAppSendConfigured(), handoff: false, ignored: true };
+  }
   const contact = await getOrCreateContact({
     ownerId,
     phone: message.from,
     senderName: message.senderName,
   });
-  const lead = await getOrCreateLead({
+  const continuedLead = continuedLeadId ? await supabase.from("leads").select("id,status")
+    .eq("id", continuedLeadId).eq("owner_id", ownerId).eq("contact_id", contact.id).single() : null;
+  if (continuedLead && (continuedLead.error || !continuedLead.data)) throw Error("intake_continuation_lead_unavailable");
+  const lead = continuedLead?.data ?? await getOrCreateLead({
     ownerId,
     contactId: contact.id,
     originalMessage: body,
   });
+  await saveIntakeAnswer(lead.id, {}, captureWhatsAppReferral(message.rawMessage));
   const conversation = await getOrCreateConversation({
     ownerId,
     leadId: lead.id,
@@ -483,7 +490,7 @@ async function processIncomingMessage(message: IncomingWhatsAppMessage) {
     body,
     processed_text: body,
     transcription,
-    raw_payload: message.rawMessage,
+    raw_payload: { type: message.kind, referral: captureWhatsAppReferral(message.rawMessage) },
     received_at: message.receivedAt,
   });
   if (insertError) {
@@ -539,7 +546,7 @@ async function processIncomingMessage(message: IncomingWhatsAppMessage) {
       conversationId: conversation.id,
       leadId: lead.id,
       to: message.from,
-      body: "Te sigo 👍 Se me cruzó un problema técnico un segundo. ¿Me repites el último mensaje? Prefiero preguntarte otra vez a responderte cualquier cosa.",
+      body: "Recibí tu mensaje. Hubo un problema técnico al procesarlo; lo que compartiste quedó guardado para continuar contigo.",
     });
     return { duplicate: false, replied: true, handoff: false, ignored: false };
   }
@@ -548,7 +555,6 @@ async function processIncomingMessage(message: IncomingWhatsAppMessage) {
     await finishWhatsAppAgentHandoff({
       ownerId,
       leadId: lead.id,
-      previousLeadStatus: lead.status,
       conversationId: conversation.id,
       agentSummary: agentResult.handoffSummary,
       handoffReason: agentResult.handoffReason,
@@ -598,7 +604,7 @@ export async function POST(request: Request) {
     const rawBody = await request.text();
     const signature = request.headers.get("x-hub-signature-256");
 
-    if (!verifyMetaWebhookSignature(rawBody, signature)) {
+    if (!process.env.META_APP_SECRET?.trim() || !verifyMetaWebhookSignature(rawBody, signature)) {
       return NextResponse.json({ error: "Invalid webhook signature" }, { status: 401 });
     }
 

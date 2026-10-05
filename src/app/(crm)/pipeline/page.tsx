@@ -22,8 +22,8 @@ type PipelineLead = {
   lead_score: number;
   intention_level: string | null;
   contacts:
-    | { full_name: string | null; phone: string }
-    | { full_name: string | null; phone: string }[]
+    | { full_name: string | null; phone: string | null }
+    | { full_name: string | null; phone: string | null }[]
     | null;
   businesses:
     | { name: string | null }

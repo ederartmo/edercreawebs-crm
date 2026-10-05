@@ -1,16 +1,34 @@
 # EderCreaWebs CRM / WhatsApp Agent
 
-El CRM centraliza contactos, negocios, leads, conversaciones, activos, tareas y seguimiento comercial de EderCreaWebs. WhatsApp Agent V2 conversa con prospectos para entender qué venden, cómo llegan sus clientes y cómo ocurre la venta, sin convertir la conversación en un cuestionario rígido.
+El CRM centraliza contactos, negocios, leads, conversaciones, activos, tareas y seguimiento comercial de EderCreaWebs. El nuevo rol de WhatsApp Agent es atención, Intake V1 y calificación: recuperar lo conocido, completar solo faltantes y dejar el proyecto listo para revisión personal de Eder. La propuesta visual y cotización se preparan manualmente.
 
 **El agente conversa y razona; el código protege acciones de negocio.**
 
 ## Flujo y arquitectura actuales
 
-WhatsApp Cloud API → webhook Next.js → texto o descarga/transcripción de audio → contexto CRM → agente OpenAI Responses → herramientas controladas → Supabase → referencias de negocio → enriquecimiento público complete → Proposal Prep V1 → visual_proposals draft + cuatro visual_proposal_sections pending. Desde acciones internas explícitas: Visual Direction → anchor móvil → aprobación de Eder → pantallas 2–4. Visual Generator está implementado localmente; no se dispara automáticamente desde WhatsApp y todavía no está desplegado ni probado con imágenes reales.
+Meta/orgánico → web o WhatsApp → ficha canónica de Intake → completar faltantes → ready_for_quote → Eder revisa personalmente. Backend local, pendiente de aplicar la migración de Intake y desplegar en una operación posterior autorizada. No hay landing ni webchat nuevos.
+
+Proposal Prep y Visual Generator quedan congelados como experimentos históricos. El auto-trigger enrichment → Prep exige `WHATSAPP_PROPOSAL_PREP_ENABLED=true`; por defecto false. `WHATSAPP_VISUAL_GENERATION_ENABLED=false`; no hay generaciones desde Intake. La prueba histórica Bruma se conserva sin cambios. Las secciones de estos motores más abajo documentan código retenido, no el objetivo comercial vigente.
 
 El webhook verifica el callback, recibe texto/audio, comprueba duplicados y persiste mensajes. Recupera contexto comercial y hasta 30 mensajes para el agente. Las herramientas permiten guardar contexto y proceso comercial, solicitar referencias, normalizar URLs/handles y guardar activos. El enriquecimiento se programa con Next.js `after()`; investiga información pública y guarda una ficha y fuentes en el activo para turnos posteriores.
 
-El handoff marca intervención humana, guarda resumen y pausa el bot. Las migraciones incluyen un trigger para tareas de seguimiento. El aviso administrativo por WhatsApp es opcional y tolera fallos de envío.
+El handoff de Intake marca intervención humana, guarda resumen, pausa el bot y crea una tarea idempotente mediante una RPC transaccional, sin escribir lead.status. El handoff humano anterior también conserva ahora el status. El aviso administrativo existente sigue siendo opcional.
+
+## Intake V1
+
+Contrato, auditoría del schema, API, atribución, seguridad y pruebas: [handoff/INTAKE_V1.md](handoff/INTAKE_V1.md). Dominio puro en `src/lib/intake/domain.ts`; almacenamiento de servidor en `service.ts`; adaptador web en `/api/intake/session`; adaptador WhatsApp en el agente/webhook existentes.
+
+Se reutilizan `contacts`, `businesses`, `leads` y `assets`. La migración **local, no ejecutada remotamente** añade `leads.intake` e `intake_sessions` y permite `contacts.phone=NULL` para contactos web/email. La sesión parcial permanece anónima; al alcanzar readiness, el backend crea contacto, negocio cuando corresponde, lead y tarea en una transacción, vincula la sesión y vacía el staging. No depende de WhatsApp. Reenvíos y recargas no duplican registros. Nombre, negocio, proceso y objetivo usan las columnas existentes.
+
+Readiness requiere ocho grupos: nombre + teléfono/email; qué vende; adquisición o cómo vende; proceso tras interés; objetivo o fricción; rango de inversión válido; timing; referencia existente o declaración explícita de ausencia digital. `completion_percent=round(grupos completos/8*100)`; `missing_fields` contiene solo grupos incompletos. Se calcula al leer, sin flags derivados que puedan quedar obsoletos. Presupuesto nunca modifica pricing. El agente recibe known_fields/missing_fields/ready_for_quote y el código selecciona una sola pregunta; completo produce cierre y handoff sin prometer plazos.
+
+Web guarda una respuesta por POST y recupera progreso con cookie HttpOnly opaca. Ready crea la tarea «Revisar proyecto y preparar cotización», marca human_required, bot pausado e intake.ready_for_quote como constancia de recepción lista, sin cambiar lead_status. La evaluación pura sigue siendo la autoridad sobre los datos actuales. El teléfono web declarado se conserva como user_provided en intake hasta verificarse por transporte; no se asigna a otro contacto por coincidencia no verificada.
+
+Tras completar web se puede emitir un código `ECW-` de 24h: WhatsApp lo resuelve antes de crear registros y recupera el MISMO lead. Exige firma Meta y coincidencia del teléfono declarado; para web completo con solo email, la capacidad secreta de sesión/código autoriza vincular el primer remitente firmado. El código queda ligado a ese remitente, tolerando sus reintentos sin permitir otros. La sesión dura 30 días; después de materializar devuelve solo un acuse sin datos CRM/UUIDs, acepta reenvíos como no-op y permite emitir continuidad. No admite edición pública del lead.
+
+First-touch conserva UTM, landing/referrer saneados y datos Meta permitidos sin sobrescritura; un referral posterior se conserva separado. No se descargan medios del anuncio ni se guardan payloads completos. El enriquecimiento público no rellena por sí solo hechos de Intake.
+
+Web permanece deshabilitado con `INTAKE_WEB_ENABLED=false` hasta autorizar migración/publicación. Faltan UI de preguntas, botón WhatsApp, carga segura de fotos, revisión de retención y protección antiabuso del hosting. Web-only ya termina en CRM con tarea. Meta Lead Ads requiere integración autenticada e idempotente futura; su importador podrá usar el mismo contrato, incluido `project_interest`.
 
 ## Stack y módulos
 
@@ -43,7 +61,7 @@ Persiste JSON en visual_proposals.direction_notes y briefs autónomos por secci�
 
 Se eliminó el upsert destructivo de secciones: INSERT sin reemplazo y, ante conflicto UNIQUE, UPDATE de brief/title/section_type únicamente con `status=pending AND asset_id IS NULL`. Nunca resetea status/asset_id de una fila existente. Si detecta una sección protegida conserva la propuesta y registra `protected_sections`; los conflictos concurrentes no borran una generación. Se verifica coherencia de las cuatro secciones antes de liberar la reserva. No hay transacción entre tablas: un error controlado libera la reserva para reintento; una interrupción abrupta puede dejar `preparing` y exige reconciliación por operador, sin takeover por tiempo.
 
-`enrichBusinessReferenceAsset` dispara Prep como paso separado fuera de su catch, tanto al terminar como al reintentar una referencia ya complete. Su fallo conserva enrichment complete. automation_runs usa workflow whatsapp-proposal-prep-v1, estados started/completed/failed e input/output pequeños (IDs, versión, conteo, readiness); los errores son códigos por etapa, sin conversación ni respuestas del proveedor.
+`enrichBusinessReferenceAsset` solo dispara Prep si `WHATSAPP_PROPOSAL_PREP_ENABLED=true`; Intake V1 lo deja apagado. El código retenido lo ejecuta como paso separado fuera de su catch y conserva enrichment complete ante fallos. automation_runs usa workflow whatsapp-proposal-prep-v1, estados started/completed/failed e input/output pequeños.
 
 El lead conserva activos_recibidos: ni Prep ni Visual Generator cambian automáticamente lead.status, incluso después de las cuatro imágenes. Quote Generator permanece pendiente. El agente confirma recepción de referencias, explica su utilidad para aterrizar la propuesta y solo pregunta una incógnita comercial si puede cambiar la solución, sin afirmar investigación recién hecha ni prometer plazos.
 

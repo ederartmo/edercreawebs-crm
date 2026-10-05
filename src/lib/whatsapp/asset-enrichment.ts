@@ -344,7 +344,8 @@ async function enrichReferenceAsset(assetId: string) {
 
 export async function enrichBusinessReferenceAsset(assetId: string) {
   const { leadId, ...enrichment } = await enrichReferenceAsset(assetId);
-  // Separate step, outside enrichment's catch. Complete assets also retry prep.
+  // Frozen by default. Explicit opt-in only; Intake never depends on Proposal Prep.
+  if (process.env.WHATSAPP_PROPOSAL_PREP_ENABLED !== "true") return { ...enrichment, proposalPrep: { status: "disabled" } };
   const proposalPrep = await tryPrepareVisualProposalDraft({ leadId, sourceAssetId: assetId });
   return { ...enrichment, proposalPrep };
 }

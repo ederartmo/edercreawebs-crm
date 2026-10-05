@@ -12,8 +12,8 @@ type LeadListRow = {
   suggested_price: number | null;
   currency: string;
   contacts:
-    | { full_name: string | null; phone: string }
-    | { full_name: string | null; phone: string }[]
+    | { full_name: string | null; phone: string | null }
+    | { full_name: string | null; phone: string | null }[]
     | null;
   businesses:
     | { name: string | null; industry: string | null }

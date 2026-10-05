@@ -1,5 +1,74 @@
 # Estado actual
 
+## Checkpoint vigente — Intake V1 local (2026-10-05)
+
+### Corrección del bloqueo web-only — lista para revisión de commit
+
+Web es el camino principal. Una sesión parcial no crea CRM; una sesión ready crea contacto, negocio cuando corresponde, lead y tarea «Revisar proyecto y preparar cotización», vincula la sesión y vacía staging en una transacción. human_required=true, bot pausado e intake.ready_for_quote registran la recepción lista; no cambia lead_status. Guardados finales repetidos y recargas son idempotentes. GET reconcilia una finalización interrumpida; un fallo de tarea revierte todos los inserts CRM y conserva respuestas para reintento.
+
+La migración sigue siendo el MISMO archivo local no aplicado: ahora permite contacts.phone=NULL para email-only y separa teléfono web declarado de transporte verificado. No inventa teléfonos ni asocia contactos existentes por datos no verificados del navegador. Cambios de tipos nullable en hoy/leads/pipeline, sin nueva UI. Si al verificar ECW ya existe un contacto con ese teléfono, se conserva el mismo lead, se usan los datos confirmados y se conserva el contacto web original para reconciliación (intake.submitted_contact_id), sin borrar datos CRM.
+
+ECW puede emitirse después de completar web. El webhook resuelve la sesión transaccionalmente ANTES de get-or-create y usa su lead exacto, aunque exista otro más reciente. La misma fila de sesión serializa materialización y continuidad. Firma, owner, vigencia y coincidencia de teléfono obligatorios; web completo email-only puede vincular el primer remitente firmado mediante su capacidad secreta. Una vez vinculado, solo ese remitente puede reintentar el código hasta expirar/rotar. Inválido/expirado no crea un lead alterno. Web listo llega a WhatsApp sin preguntas ni llamada al modelo. First-touch/source se conservan; last_channel/whatsapp_verified_at y último referral registran el paso posterior.
+
+Validación de esta corrección: **64/64 pruebas, cero skipped** (las 45 anteriores + 19 nuevas en `scripts/test-intake-web-crm.mjs`), PostgreSQL local en memoria y proveedores simulados. Incluye los diez casos pedidos, email-only, propietario/remitente incorrectos, ECW vencido/repetido, rollback, recuperación GET y elección exacta del lead frente a otro reciente. TypeScript y ESLint del batch aprobados; git diff --check aprobado. No hubo cambios remotos, llamadas reales, nuevas dependencias del CRM, commit, push ni deploy. Proposal Prep sigue congelado y Visual Generator intacto.
+
+Recomendación: aprobar para commit del batch local tras revisar diff/migración. La aplicación remota y publicación siguen requiriendo autorización posterior. Antes de publicar, probar concurrencia multiconexión e integración aislada real. Ya NO queda pendiente materializar web-only ni crear su tarea; los pendientes de UI, uploads, retención y antiabuso siguen vigentes.
+
+El objetivo comercial cambia a atención + intake + calificación → READY FOR QUOTE → Eder revisa y prepara propuesta manualmente. Proposal Prep automático y Visual Generator quedan congelados. No ejecutar el helper Bruma mencionado en los checkpoints históricos de abajo.
+
+Repo/root/remoto confirmados, rama `feat/whatsapp-cloud-mvp`, HEAD `adb3014a1c4192dc567d0f0d658096f95f94caee`. Doctor sin FAIL con entorno propio cargado; catálogo efectivo incluye supabase-edercreawebs y no supabase-miriam. Solo consultas remotas de metadatos a ycdosrsanutbhbgejwwg. Sin commit, push, deploy, escrituras remotas ni llamadas reales a Meta/OpenAI.
+
+Cambios previos conservados: este handoff ya estaba modificado; `Nuevo Documento de texto.txt`, `handoff/visual-internal-screen-1.png`, `handoff/visual-internal-smoke.json` y `scripts/visual-internal-smoke.mjs` estaban sin seguimiento. No se modificaron ni agregaron a Git los cuatro archivos; `.env.local` intacto. El contenido histórico del handoff se conserva debajo.
+
+### Implementado
+
+- Dominio reutilizable `src/lib/intake`: normalización, fill-only merge, readiness de ocho requisitos, completion/missing/known, presupuesto como rango, atribución allowlist, tokens seguros y servicio canónico.
+- Reutiliza contacts/businesses/leads/assets. Migración **solo local** `20261005200629_intake_v1.sql`: leads.intake (campos sin equivalente), intake_sessions (staging web anónimo) y RPCs service-only con RLS/permisos explícitos. No cambia enums ni pricing. Al vincular, copia a columnas semánticas existentes y vacía el staging.
+- `/api/intake/session`: create/save/GET/continue, cookie HttpOnly aleatoria con hash persistido, TTL 30 días, validación de origen/payload/allowlist, límite durable de creación, deshabilitado por defecto. No acepta lead_id/owner_id del cliente. Web ready materializa automáticamente; después devuelve solo acuse y permite continuidad ECW de 96 bits/24h ligada a un remitente verificado. Navegador vinculado no puede leer/editar el lead.
+- Agente recibe known_fields/missing_fields/ready_for_quote; guarda respuestas explícitas y responde FAQs. Código añade una sola pregunta faltante. Ready produce cierre fijo y RPC atómica: human_required, bot pausado, resumen y tarea única. No escribe status. El handoff anterior también deja de degradar a calificado.
+- First-touch UTM/Meta inmutable; último referral adicional separado y no borrado por mensajes sin referral. Payload persistido reducido, código ECW retirado. Firma Meta ahora obligatoria para POST del webhook.
+- Auto-trigger de Proposal Prep protegido por `WHATSAPP_PROPOSAL_PREP_ENABLED=false`; Visual Generator intacto y `WHATSAPP_VISUAL_GENERATION_ENABLED=false`. No se generaron propuestas ni imágenes.
+
+### Validación
+
+- 64/64 pruebas aprobadas: `test-intake.mjs`, `test-intake-sql.mjs`, `test-intake-web-crm.mjs`, `test-proposal-prep.mjs`, `test-visual-generator.mjs`. Sin proveedor real. SQL aplica baseline/handoff/Intake localmente y valida además web-only → CRM y continuidad al mismo lead.
+- PGlite instalado temporalmente fuera del repositorio con autorización; no cambian package.json/lock. Para repetir SQL establecer ECW_PGLITE_MODULE al módulo temporal. Sin esa variable la prueba SQL es skipped; en esta validación sí se ejecutó.
+- `npx tsc --noEmit --incremental false`: aprobado. ESLint solo del batch: aprobado. `git diff --check`: aprobado. Error general de reset-password histórico fuera de alcance; no se ejecutó lint global/build ni se corrigió.
+
+### Siguiente paso
+
+Revisar diff y [contrato detallado de Intake](INTAKE_V1.md). Antes de publicar hace falta autorizar/aplicar la migración, configurar origen y probar integración aislada con servicios reales. No activar flags visuales. Web Onboarding V1 pendiente: UI de preguntas, botón WhatsApp y uploads; políticas de retención y antiabuso del hosting. Meta Lead Ads: permisos/webhook, mapeo, identidad e idempotencia futuros usando el mismo contrato. No hay cotización, pricing, HTML/PDF, email, landing ni webchat nuevos.
+
+Limitaciones: extracción/FAQ libre dependen del modelo y requieren evaluación conversacional real; readiness es determinístico sobre datos capturados. Idempotencia se garantiza por sesión; no se fusionan automáticamente sesiones distintas por email/nombre no verificados. El sistema previo de deduplicación/entrega no es una outbox durable; fallo de envío tras persistir/pausar requiere recuperación operativa. No se verificó producción ni se alteraron los experimentos históricos.
+
+## Prueba interna de Screen 1 ejecutada — pendiente de revisión de Eder (2026-10-05)
+
+Tras el «adelante» explícito se completó UNA llamada real: gpt-image-2.5-sunburst-2026-09-08, override local xhigh, PNG 864x1536, solo Screen 1. Los dos intentos previos se detuvieron antes del proveedor (red sandbox y clave ausente del proceso). La clave configurada estaba en .env.local; se leyó únicamente OPENAI_API_KEY al proceso temporal, sin modificar/copiar archivos de secretos. Doctor sin FAIL. Flag habilitado solo dentro del proceso ya terminado.
+
+Resultado: section 1 review_pending, asset_id `86eb01d3-7d75-4845-95e8-3da6881cdee4`; propuesta visual_in_progress; sections 2–4 pending sin asset. automation_run `22538965-d540-4e51-adfb-d9e6688f108f` completed; request_id `req_27c897bd65774414afbd6af6848ba635`. Storage whatsapp-imports descargado y verificado: PNG 864x1536, 1080529 bytes, tamaño coincide con assets, spec_hash coincide con el VisualSpec persistido. Copia local para revisión: handoff/visual-internal-screen-1.png. Reporte: handoff/visual-internal-smoke.json (image_calls_this_process=1). No hubo aprobación automática, screens restantes, mensajes, deploy, migraciones ni commit.
+
+Inspección visual: una sola vista móvil, nombre textual, selector de servicios y CTA legible; sin precios, fotos, testimonios ni mockup. El modelo añadió microcopy genérico («Estilo a tu medida», «Perfil y acabado») no literal del brief: revisar con Eder. El costo real no se obtuvo del proveedor; no afirmar importe. No volver a ejecutar generación sobre este fixture: revisión pendiente, cualquier nuevo gasto exige acción explícita.
+
+Los párrafos siguientes conservan el contexto de preparación previo a esta ejecución; la autorización y la generación ya se completaron como se describe arriba.
+
+Checkpoint Visual Generator V1 ya publicado en Git: `adb3014a1c4192dc567d0f0d658096f95f94caee`, rama feat/whatsapp-cloud-mvp. Las referencias a «sin commit» debajo son históricas. No hubo deploy.
+
+El usuario pidió un caso ficticio aislado y prohibió generar hasta decir «adelante». Búsqueda remota solo lectura no encontró leads identificados como test/prueba/demo/sandbox/ficticios. Después de explicar las siete filas mínimas y obtener aprobación de ejecución fuera del sandbox, se creó el fixture interno en Supabase ycdosrsanutbhbgejwwg: un contacto sin teléfono enrutable, un lead con source/internal_notes `internal_test_visual_generator_v1_bruma`, bot_mode paused y human_required false, una propuesta draft y cuatro sections pending sin asset. Ningún cliente existente se modificó.
+
+- Negocio ficticio: Bruma Barbería, corte de cabello y arreglo de barba; solicitudes por WhatsApp y confirmación manual; fricción de servicio/horario dispersos en mensajes.
+- lead_id: `b8bd70ad-074d-4d02-9b47-fcd1bae16ec2`.
+- proposal_id: `676c6e77-3334-4a08-be72-96831388af12`.
+- Screen 1: service_selection; «Tu próximo corte, sin vueltas.»; selector Corte / Barba; CTA «Solicitar cita»; nombre en texto simple, sin logo ni fotografía inventada.
+- Brief sintético autorado localmente y validado con parseProposalBrief/proposalSectionRows. NO es resultado de una ejecución real de Prep ni de enrichment web. Se prueba Visual Generator, no el flujo E2E anterior.
+- Branding propuesto: #325A47, #F6F1E7, #AD4E28 y system sans. Cero assets de entrada. VisualSpec/prompt se validaron localmente; el freeze persistente sucederá dentro de generateVisualAnchor cuando se autorice.
+- Modelo/quality/size: gpt-image-2.5-sunburst-2026-09-08 / xhigh / 864x1536 PNG; n=1. Override exclusivo del helper local del smoke test; proveedor de producción conserva high. Preparación: cero llamadas OpenAI, mensajes o assets; verificación remota también confirma cero tasks y automation_runs.
+
+Helper nuevo sin commit: `scripts/visual-internal-smoke.mjs`; reporte no sensible: `handoff/visual-internal-smoke.json`. --prepare inserta solo filas faltantes del fixture y rechaza identidades/contenidos distintos; --inspect es lectura remota y actualiza reporte local. La red está limitada al Supabase autorizado y, solo en modo generación explícito, a /v1/images/generations con máximo una llamada por proceso. No hay imports de mensajería ni generación 2–4. Node --check y ESLint del helper pasaron. Archivos funcionales de V1 intactos.
+
+Comando pendiente, NO ejecutado: cargar entorno con `. ./scripts/start.ps1 -DryRun` y luego `node scripts/visual-internal-smoke.mjs --generate-anchor --confirm-one-paid-call`. El helper habilita WHATSAPP_VISUAL_GENERATION_ENABLED=true exclusivamente en su proceso efímero, después de validar el fixture y la clave, y llama a generateVisualAnchor con el proposal_id anterior. No modifica el archivo de secretos ni .env.local. El modo de generación rechaza un fixture ya utilizado; no hay retry/regeneración implícita.
+
+Bloqueos antes de ejecutar: autorización textual «adelante» y OPENAI_API_KEY en el entorno externo (doctor sigue reportándola ausente; no pedirla por chat). No se activó el flag durante preparación. No dar un costo total como garantizado: tarifa oficial consultada de Sunburst estándar, texto entrada 5 USD/millón y salida imagen 30 USD/millón; consumo de salida todavía desconocido. Tras la única llamada verificar section 1 review_pending/asset_id, metadata y bytes PNG en Storage, dimensions 864x1536, spec_hash, run, inspección visual y sections 2–4 todavía pending. Ante unknown no repetir; aplicar recuperación explícita. Sin cotización, mensajes, deploy, migraciones ni commit.
+
 ## Checkpoint vigente — Visual Generator V1 local (2026-10-05)
 
 Implementada y probada la opción elegida: **V1 sin migraciones mediante coordinación persistente y updates condicionales**. Sin commit, push, deploy, migraciones, generaciones reales ni escrituras de producción. HEAD base sigue `5854e4c0200b6289ec0cbcb5a68c5e4a21b5b451` en `feat/whatsapp-cloud-mvp`. Doctor pasó sin FAIL; entorno externo y Supabase autorizado confirmados durante esta sesión. `.env.local` y `Nuevo Documento de texto.txt` intactos; el archivo personal sigue sin seguimiento.
@@ -181,3 +250,9 @@ Proposal Engine planeado: usar contexto + enrichment; generar brief comercial; d
 ## No olvidar
 
 Supabase único: `ycdosrsanutbhbgejwwg`. Secretos externos en `$HOME/.secrets/edercreawebs-crm.env`. Ejecutar doctor antes de operaciones importantes; FAIL exige abortar escrituras. No modificar producción, lógica, migraciones remotas, secretos originales ni archivo personal sin autorización. Documentos históricos quedan intactos.
+# Revisión dirigida de compatibilidad Intake V1
+
+- Phone nullable revisado en webhook, CRM/inbox, listas, pipeline, hoy e importador: sin bug de nullabilidad encontrado. SQL local comprueba UNIQUE(owner_id,phone) y proyección de inbox con NULL.
+- Email-only → ECW probado con servicio y webhook reales sobre SQL local: mismo contacto/lead, teléfono real asignado, first-touch intacto, sin preguntas ni tareas duplicadas.
+- Dedupe entre sesiones por email no verificado queda pendiente de decisión de identidad: actualmente dos sesiones completas crean dos registros, aunque cada sesión es idempotente. No fusionar automáticamente: el ECW de otra sesión podría asignar teléfono a un contacto compartido ajeno. Detalle en INTAKE_V1.md.
+- 66 tests pasan sin skips, incluidas las 45 anteriores; TypeScript, ESLint del batch y git diff --check aprobados. Migración sigue local. Esta revisión solo amplía pruebas/documentación, sin cambio productivo, commit, push o deploy.

@@ -34,6 +34,8 @@ Next.js 16.x, React 19.x, TypeScript 6.x, Supabase JS 2.x y Tailwind 4.x. Node.j
 
 Desde la raíz, en PowerShell:
 
+Entrada humana recomendada en Windows: doble clic en `ABRIR_CODEX.cmd` desde el Explorador. Entrada manual alternativa: `./scripts/start.ps1`. El `.cmd` usa su propia carpeta como cwd y delega toda la lógica a `start.ps1` mediante Windows PowerShell. Para probar sin abrir Codex: `./ABRIR_CODEX.cmd -DryRun`.
+
 ```powershell
 ./scripts/start.ps1           # launcher canónico
 ./scripts/start.ps1 -DryRun   # valida sin abrir sesión Codex

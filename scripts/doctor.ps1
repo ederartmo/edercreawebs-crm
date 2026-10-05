@@ -11,7 +11,7 @@ function Report([string]$Level, [string]$Message) {
     if ($Level -eq 'FAIL') { $script:failureCount++ }
 }
 function ProjectGit {
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
+    param([string[]]$Arguments)
     & git -c "safe.directory=$projectRoot" -C $projectRoot @Arguments 2>$null
 }
 function ReadEnvironment([string]$Path) {
@@ -50,6 +50,80 @@ function CheckSupabase([hashtable]$Values, [string]$Source) {
     }
 }
 
+function CheckLocalMcp {
+    $configPath = Join-Path $projectRoot '.codex/config.toml'
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        Report FAIL 'Falta .codex/config.toml; aislamiento MCP obligatorio.'
+        return
+    }
+    Report OK 'Configuracion MCP local existe.'
+    # Deliberately accept only the small audited schema; do not evaluate TOML as code.
+    # Full TOML syntax validation is separate. Unknown keys/tables fail closed.
+    $tables = @{}
+    $section = ''
+    foreach ($line in [IO.File]::ReadAllLines($configPath)) {
+        if ($line -match '^\s*(#|$)') { continue }
+        if ($line -match '^\s*\[mcp_servers\.(supabase-miriam|supabase-edercreawebs)\]\s*$') {
+            $section = $Matches[1]
+            if ($tables.ContainsKey($section)) { Report FAIL 'Tabla MCP duplicada; contenido omitido.'; return }
+            $tables[$section] = @{}
+            continue
+        }
+        if (-not $section -or $line -notmatch '^\s*(enabled|url)\s*=\s*(.+?)\s*$') {
+            Report FAIL 'Configuracion MCP fuera del esquema seguro aprobado; contenido omitido.'
+            return
+        }
+        $key = $Matches[1]; $literal = $Matches[2]
+        if ($tables[$section].ContainsKey($key)) { Report FAIL 'Clave MCP duplicada; contenido omitido.'; return }
+        if ($key -eq 'enabled' -and $literal -match '^(true|false)$') {
+            $tables[$section][$key] = $literal -eq 'true'
+        } elseif ($key -eq 'url' -and $literal -match '^"([^"\\]*)"$') {
+            $tables[$section][$key] = $Matches[1]
+        } else { Report FAIL 'Valor MCP no admitido; contenido omitido.'; return }
+    }
+    if (-not $tables.ContainsKey('supabase-miriam') -or -not $tables['supabase-miriam'].ContainsKey('enabled') -or $tables['supabase-miriam']['enabled'] -ne $false) {
+        Report FAIL 'Miriam no esta explicitamente disabled localmente.'
+    } elseif ($tables['supabase-miriam'].Count -ne 1) {
+        Report FAIL 'La tabla de Miriam solo debe deshabilitar el servidor heredado.'
+    } else { Report OK 'Miriam disabled en configuracion local.' }
+    if (-not $tables.ContainsKey('supabase-edercreawebs')) {
+        Report FAIL 'Falta MCP supabase-edercreawebs.'
+        return
+    }
+    $crm = $tables['supabase-edercreawebs']
+    if (-not $crm.ContainsKey('enabled') -or $crm['enabled'] -ne $true) { Report FAIL 'MCP EderCreaWebs no esta enabled.' }
+    else { Report OK 'MCP EderCreaWebs enabled.' }
+    if (-not $crm.ContainsKey('url')) { Report FAIL 'Falta URL MCP del CRM.' }
+    elseif ($crm['url'] -ne "https://mcp.supabase.com/mcp?project_ref=$expectedRef&read_only=true") {
+        if ($crm['url'] -match $forbiddenRef) { Report FAIL 'MCP local apunta al proyecto prohibido de Miriam.' }
+        Report FAIL 'URL MCP distinta de la autorizada: requiere endpoint propio, project_ref correcto y read_only=true; valor omitido.'
+    } else {
+        Report OK "MCP project_ref correcto: $expectedRef."
+        Report OK 'MCP read_only=true; sin credenciales locales.'
+    }
+
+    $trusted = $false
+    if ($HOME) {
+        $globalPath = Join-Path $HOME '.codex/config.toml'
+        if (Test-Path -LiteralPath $globalPath -PathType Leaf) {
+            $projectSection = $false
+            foreach ($line in [IO.File]::ReadAllLines($globalPath)) {
+                if ($line -match '^\s*\[') {
+                    $projectSection = $false
+                    if ($line -match '^\s*\[projects\.["'']([^"'']+)["'']\]\s*$') {
+                        $declaredRoot = $Matches[1].Replace('\\', '\').TrimEnd('\', '/')
+                        $projectSection = $declaredRoot -eq $projectRoot
+                    }
+                } elseif ($projectSection -and $line -match '^\s*trust_level\s*=\s*"trusted"\s*$') { $trusted = $true }
+            }
+        }
+    }
+    if ($trusted) { Report OK 'Entrada explicita trusted encontrada para este repo en configuracion del usuario.' }
+    else { Report WARN 'Sin entrada explicita trusted verificable para el repo; el cliente debe confirmar confianza para aplicar la capa local.' }
+    Report WARN 'OAuth MCP no comprobado; autenticar desde el cliente solo si lo solicita.'
+    Report WARN 'Recarga de la app y catalogo efectivo de sesiones abiertas no comprobados; validar en una sesion nueva del repo.'
+}
+
 try {
     $currentRoot = & git -c "safe.directory=$projectRoot" rev-parse --show-toplevel 2>$null
     if ($LASTEXITCODE -ne 0 -or [IO.Path]::GetFullPath([string]$currentRoot).TrimEnd('\', '/') -ne $projectRoot) {
@@ -64,6 +138,7 @@ try {
     $branch = ProjectGit @('branch', '--show-current')
     if ($branch -eq 'feat/whatsapp-cloud-mvp') { Report OK "Rama: $branch." }
     else { Report WARN 'Rama distinta de feat/whatsapp-cloud-mvp o HEAD detached.' }
+    CheckLocalMcp
     $status = @(ProjectGit @('status', '--porcelain'))
     if ($status.Count) { Report WARN "Working tree con $($status.Count) entradas; revisar git status." }
     else { Report OK 'Working tree limpio.' }
@@ -135,7 +210,7 @@ try {
     if ($LASTEXITCODE -eq 1) { Report OK '.env.example permanece versionable.' }
     else { Report FAIL '.env.example esta ignorado o no se pudo verificar.' }
     Report WARN 'El escaneo de tokens usa patrones; no garantiza ausencia de secretos ni revisa historial.'
-    Report WARN 'MCP global supabase-miriam prohibido; aislamiento local aun pendiente. No usarlo para este CRM.'
+    Report WARN 'MCP global supabase-miriam prohibido; confirmar exclusion efectiva en el catalogo del cliente antes de usar Supabase.'
     Report WARN 'Hosting/callback Meta/variables productivas y migraciones remotas POR CONFIRMAR; sin llamadas remotas.'
 } catch {
     if ($_.Exception.Message -ne 'identity-stop') { Report FAIL 'No se pudo completar una verificacion; detalle omitido para proteger valores.' }

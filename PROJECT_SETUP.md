@@ -8,7 +8,25 @@
 - Rama de trabajo: `feat/whatsapp-cloud-mvp`; principal: `main`.
 - Supabase autorizado: `ycdosrsanutbhbgejwwg`, URL pública `https://ycdosrsanutbhbgejwwg.supabase.co`.
 - Prohibido para este CRM: MCP `supabase-miriam` / ref `rkqfloazqjsprbqhgnix`.
-- No hay aislamiento MCP local instalado. No crear `.codex/config.toml` ni `opencode.jsonc` hasta verificar cómo aislar herramientas sin alterar la configuración global.
+- Codex MCP local: `.codex/config.toml`; permite `supabase-edercreawebs` con ref `ycdosrsanutbhbgejwwg`, modo inicial read-only, y deshabilita explícitamente `supabase-miriam` dentro del CRM. La configuración global queda intacta. OpenCode sigue pendiente.
+
+## Aislamiento Codex/MCP
+
+El método validado con Codex 0.159.2 es `start.ps1` + CLI overrides. El launcher carga el entorno propio, exige doctor sin FAIL e inicia Codex con `--no-daemon`, `--cd` canónico y estos overrides:
+
+```text
+mcp_servers.supabase-miriam.enabled=false
+mcp_servers.supabase-edercreawebs.enabled=true
+mcp_servers.supabase-edercreawebs.url="https://mcp.supabase.com/mcp?project_ref=ycdosrsanutbhbgejwwg&read_only=true"
+```
+
+Se conserva `.codex/config.toml` como configuración declarativa y protección de la intención del proyecto; los overrides evitan depender de su aplicación por Codex 0.159.2. OAuth del cliente permanece fuera del repo, independiente del entorno de aplicación. El launcher no modifica configuración global ni autentica MCP.
+
+La capa local solo se aplica cuando Codex considera confiable este proyecto. Abrir un chat asociado a otra carpeta, o ejecutar comandos dentro del CRM desde ese chat, no lo convierte automáticamente en una sesión del CRM. Abre/inicia Codex con este repo como workspace/directorio del proyecto.
+
+La lectura MCP real ya funcionó: EderCreaWebs disponible, Miriam ausente, ref configurado `ycdosrsanutbhbgejwwg` y `read_only=true`. Cada sesión nueva debe comprobar su catálogo activo antes de usar Supabase. Acepta confianza/OAuth solo si el cliente lo solicita; no cambies confianza ni autenticación global automáticamente.
+
+Doctor comprueba estáticamente la configuración local conservadora (solo las dos tablas MCP aprobadas, valores simples y sin credenciales). No sustituye la comprobación del catálogo, la autenticación ni la recarga de una app ya abierta. La validación TOML completa se ejecutó por separado al instalar esta configuración.
 
 ## Runtime y comandos
 
@@ -17,7 +35,8 @@ Next.js 16.x, React 19.x, TypeScript 6.x, Supabase JS 2.x y Tailwind 4.x. Node.j
 Desde la raíz, en PowerShell:
 
 ```powershell
-. ./scripts/start.ps1
+./scripts/start.ps1           # launcher canónico
+./scripts/start.ps1 -DryRun   # valida sin abrir sesión Codex
 ./scripts/doctor.ps1
 npm run dev
 npm run lint
@@ -25,7 +44,9 @@ npm run build
 npm run start
 ```
 
-`start.ps1` importa al proceso actual variables no vacías del archivo externo, sin mostrar valores, y ejecuta doctor. Puede ejecutarse también con `-SkipDoctor`, debiendo revisar doctor antes de operaciones importantes. Dot-source mantiene la sesión en la raíz del proyecto. Un proceso PowerShell hijo no puede cargar variables en su proceso padre.
+`start.ps1` exige cwd canónico y valida raíz Git/remoto. Importa variables no vacías del archivo externo sin mostrar valores y siempre ejecuta doctor. Se elimina `-SkipDoctor`: un FAIL bloquea el descubrimiento e inicio de Codex. `-DryRun` ejecuta los mismos controles y muestra el comando, omitiendo la sesión interactiva. Dot-source con `-DryRun` conserva el entorno para comandos Next.js; un proceso hijo no puede cargar variables en su padre.
+
+Descubre `codex.exe` en las instalaciones hijas de `$HOME\AppData\Local\OpenAI\Codex\bin`, excluyendo reparse points. Elige el primer ejecutable válido (`--version` exitoso), ordenado por `LastWriteTimeUtc` descendente y ruta completa ascendente en empates. No fija hashes de instalación. Si no hay instalación válida, termina con error. Ajusta las comillas TOML al paso de argumentos nativos en Windows PowerShell 5.1 y PowerShell moderno.
 
 `doctor.ps1` es de solo lectura: OK/WARN/FAIL, devuelve exit code 1 con FAIL y recomienda abortar escrituras. No consulta servicios remotos. WARN requiere evaluación antes de operar. La rama diferente y cambios locales son WARN; identidad equivocada o secretos versionados son FAIL.
 

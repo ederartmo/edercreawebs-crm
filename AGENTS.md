@@ -4,6 +4,7 @@ Lee primero `PROJECT.md`, `PROJECT_SETUP.md` y `handoff/CURRENT.md`.
 Ejecuta o revisa `scripts/doctor.ps1` antes de operaciones importantes; un FAIL exige abortar escrituras.
 Confirma root Git, remoto `ederartmo/edercreawebs-crm`, rama e infraestructura antes de escribir.
 Este CRM usa únicamente Supabase `ycdosrsanutbhbgejwwg`. No uses el MCP global `supabase-miriam` ni `rkqfloazqjsprbqhgnix`; no uses configuraciones de otros proyectos.
+Antes de usar herramientas Supabase, verifica que el catálogo efectivo contiene `supabase-edercreawebs` y no `supabase-miriam`; si no puedes confirmarlo, no uses esas herramientas.
 
 El agente conversa y razona; el código protege acciones de negocio.
 

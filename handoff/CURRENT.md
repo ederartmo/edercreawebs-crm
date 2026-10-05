@@ -1,5 +1,35 @@
 # Estado actual
 
+## Infraestructura remota Intake V1 aplicada y validada — 2026-10-05
+
+Este checkpoint sustituye las referencias históricas de abajo a «migración solo local». Repo/remoto y rama `feat/whatsapp-cloud-mvp` verificados; HEAD `d9d0a8ffe419e2c35abd29ba6327d18631c14c5e`. Entorno propio cargado desde `$HOME/.secrets/edercreawebs-crm.env`; doctor sin FAIL. Catálogo efectivo con `supabase-edercreawebs`, sin Miriam; configuración local read-only intacta.
+
+Preflight remoto de solo lectura: proyecto `ycdosrsanutbhbgejwwg` / Chatbot - EderCreaWebs, ACTIVE_HEALTHY; cuatro migraciones previas, ocho leads, sin leads.intake, intake_sessions ni RPC intake_*. contacts.phone era NOT NULL y conservaba UNIQUE(owner_id,phone); RLS activo en las 16 tablas previas. Revisión completa del SQL: sin borrado de datos ni cambios de enums; DROP NOT NULL intencional para email-only.
+
+Se aplicó exclusivamente el contenido de `supabase/migrations/20261005210820_intake_v1.sql`, mediante `supabase_apply_migration` del conector «EderCreaWebs System», project_id explícito `ycdosrsanutbhbgejwwg`, name `intake_v1`. SHA-256 del archivo intacto: `5CC678FEA2AA7BEDBFCB8E2FC6C2AD3C68CF28CF3090481B9E37148B5FE9666B`. Sin db push/reset ni otras migraciones.
+
+**Historial remoto:** la herramienta registró versión `20261005210820`, nombre `intake_v1`; el archivo local ahora coincide con esa versión. No se reparó el historial ni se reaplicó la migración.
+
+Post-verificación por catálogo: leads.intake JSONB NOT NULL DEFAULT '{}', CHECK de objeto/tamaño; contacts.phone nullable con UNIQUE previo intacto; intake_sessions con 14 columnas, 10 constraints y cuatro índices. RLS activo, sin permisos PUBLIC/anon/authenticated ni policies públicas; service_role puede operar. Las ocho RPC esperadas son SECURITY INVOKER, search_path vacío, EXECUTE solo para service_role entre los roles de aplicación (postgres conserva privilegios de propietario). anon/authenticated sin EXECUTE. Comparación antes/después: enums, vistas, funciones previas, índices, constraints, políticas y permisos/RLS anteriores intactos; única modificación de columna previa: phone nullable.
+
+Smoke remoto único: `Bruma Intake TEST 20261005 Remote V1`, email ficticio example.invalid, sin WhatsApp real ni otros proveedores. Servicio TypeScript de producción cargado temporalmente en memoria con transporte Supabase real/service_role. Sesión incompleta al 13 %, ready=false, sin crear ni alterar CRM. Completar ocho grupos creó contacto email-only con phone NULL, negocio, lead y una tarea «Revisar proyecto y preparar cotización»; human_required=true, human_reason=intake_v1_ready_for_quote, bot_mode=paused, status=nuevo, first-touch conservado, sesión vinculada y staging vacío.
+
+La comparación inicial del título se interrumpió por codificación de acentos en stdin PowerShell; el dato remoto era correcto. Se continuó sobre la MISMA sesión, sin crear otra. Reenvío final/materialización se verificaron directamente por RPC usando el hash existente; ECW se emitió por RPC y resolvió mediante el servicio real. Teléfono reservado ficticio `12025550199`: mismo contacto y lead, reintentos idempotentes, otro remitente rechazado, readiness 100 %, first-touch intacto, misma tarea incluso tras repetir handoff, sin reiniciar intake. Sin webhook HTTP/Meta real, conversación ni mensajes; no equivale a validar transporte firmado en producción o concurrencia multiconexión.
+
+IDs creados y posteriormente eliminados:
+
+- intake_session: `ca3669f0-10df-4711-85a2-168ecd3149db`
+- contact: `dbee1c83-8af5-4d3e-b7b3-937dfa7aa270`
+- business: `e4f7a99e-f320-465a-92dd-a0b8390a0f90`
+- lead: `be2abee9-0aee-4b48-ad45-3f89cc2af71a`
+- task: `eb5a31fe-3a72-45c4-9fb5-b5560e65e4c7`
+
+Limpieza transaccional por esos cinco IDs exactos, con bloqueos, comprobación de owner/marcadores TEST/vínculos y ausencia de referencias adicionales. Cinco deletes de una fila cada uno; consulta posterior confirma cero filas TEST restantes. Totales finales: ocho contactos, seis negocios, ocho leads, diez tareas, cero intake_sessions. Estados originales de leads conservados; leads previos con intake vacío. Las filas ajenas del CRM comparadas durante la continuidad permanecieron iguales.
+
+Advisors: INFO esperado por RLS sin policies en staging service-only. Avisos de objetos previos: search_path mutable en set_updated_at y ensure_whatsapp_handoff_task; rls_auto_enable SECURITY DEFINER ejecutable por anon/authenticated; protección de contraseñas filtradas desactivada. No corregidos por estar fuera del alcance. No se declara seguridad global del CRM resuelta.
+
+Único archivo local modificado en esta sesión: este handoff. Los cuatro archivos no versionados protegidos, .env.local y la migración mantienen sus hashes. Sin cambios funcionales, UI, despliegue, variables Hostinger, Meta Ads, WhatsApp/email reales, imágenes, Proposal Prep, Visual Generator, commit ni push. Publicación de la aplicación continúa pendiente y no autorizada en esta sesión.
+
 ## Checkpoint vigente — Intake V1 local (2026-10-05)
 
 ### Corrección del bloqueo web-only — lista para revisión de commit
@@ -23,7 +53,7 @@ Cambios previos conservados: este handoff ya estaba modificado; `Nuevo Documento
 ### Implementado
 
 - Dominio reutilizable `src/lib/intake`: normalización, fill-only merge, readiness de ocho requisitos, completion/missing/known, presupuesto como rango, atribución allowlist, tokens seguros y servicio canónico.
-- Reutiliza contacts/businesses/leads/assets. Migración **solo local** `20261005200629_intake_v1.sql`: leads.intake (campos sin equivalente), intake_sessions (staging web anónimo) y RPCs service-only con RLS/permisos explícitos. No cambia enums ni pricing. Al vincular, copia a columnas semánticas existentes y vacía el staging.
+- Reutiliza contacts/businesses/leads/assets. Migración `20261005210820_intake_v1.sql`: leads.intake (campos sin equivalente), intake_sessions (staging web anónimo) y RPCs service-only con RLS/permisos explícitos. No cambia enums ni pricing. Al vincular, copia a columnas semánticas existentes y vacía el staging.
 - `/api/intake/session`: create/save/GET/continue, cookie HttpOnly aleatoria con hash persistido, TTL 30 días, validación de origen/payload/allowlist, límite durable de creación, deshabilitado por defecto. No acepta lead_id/owner_id del cliente. Web ready materializa automáticamente; después devuelve solo acuse y permite continuidad ECW de 96 bits/24h ligada a un remitente verificado. Navegador vinculado no puede leer/editar el lead.
 - Agente recibe known_fields/missing_fields/ready_for_quote; guarda respuestas explícitas y responde FAQs. Código añade una sola pregunta faltante. Ready produce cierre fijo y RPC atómica: human_required, bot pausado, resumen y tarea única. No escribe status. El handoff anterior también deja de degradar a calificado.
 - First-touch UTM/Meta inmutable; último referral adicional separado y no borrado por mensajes sin referral. Payload persistido reducido, código ECW retirado. Firma Meta ahora obligatoria para POST del webhook.

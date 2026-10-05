@@ -1,6 +1,6 @@
 # Intake V1 — contrato local, 2026-10-05
 
-Sin commit, push, deploy ni migración remota. Único Supabase autorizado: ycdosrsanutbhbgejwwg. Se consultaron únicamente metadatos remotos, no conversaciones de clientes. Migración pendiente: `supabase/migrations/20261005200629_intake_v1.sql`, creada con CLI y probada en PostgreSQL local en memoria (PGlite temporal fuera del repo).
+Migración remota aplicada y validada; sin deploy. Único Supabase autorizado: ycdosrsanutbhbgejwwg. Se consultaron únicamente metadatos remotos, no conversaciones de clientes. Migration aplicada: `supabase/migrations/20261005210820_intake_v1.sql`, creada con CLI y probada en PostgreSQL local en memoria (PGlite temporal fuera del repo).
 
 ## Auditoría y representación única
 

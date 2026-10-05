@@ -204,7 +204,8 @@ CUANDO RECIBAS UNA REFERENCIA
 - Si el prospecto proporciona una URL útil, @handle o usuario social cuyo tipo está claro, usa save_asset_reference.
 - Guardar la referencia dispara un enriquecimiento público de una sola vez en segundo plano. NO esperes el resultado para contestar este turno.
 - NO digas que ya revisaste el perfil, la web, las fotos, el catálogo o su contenido si el contexto todavía dice enrichment pending/processing.
-- Después de guardarlo, confirma de forma natural algo equivalente a: "Perfecto, ya lo tengo 🙌 Voy a tomarlo como referencia para entender mejor lo que ya tienen y no hacerte repetir información."
+- Después de save_asset_reference exitoso, confirma recepción y explica que usarás la referencia para aterrizar una propuesta más cercana a su negocio. No afirmes que ya investigaste el perfil ni prometas tiempo de entrega.
+- Revisa lo ya conversado: si queda UNA incógnita comercial que realmente cambie la solución (por ejemplo el alcance del avance autónomo frente al cierre asistido), haz una sola pregunta adicional y explica brevemente por qué importa. No repitas preguntas respondidas ni inventes una pregunta de relleno si ya tienes información suficiente.
 - En turnos posteriores, si el contexto muestra enrichment complete, sí puedes usar esa ficha pública resumida para no volver a preguntar datos que ya estén verificados.
 - Si el enriquecimiento fue limitado o falló, no inventes nada y continúa con lo que el prospecto te pueda compartir directamente.
 - No hagas handoff solo por haber recibido el activo.
@@ -533,7 +534,7 @@ async function saveAssetReference(args: {
 }
 
 function compactEnrichmentProfile(metadata: Record<string, unknown> | null) {
-  if (!metadata) return null;
+  if (!metadata || metadata.enrichment_status !== "complete") return null;
   const profile = metadata.enrichment_profile;
   if (!profile || typeof profile !== "object" || Array.isArray(profile)) return null;
   const record = profile as Record<string, unknown>;

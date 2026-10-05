@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { tryPrepareVisualProposalDraft } from "@/lib/whatsapp/proposal-prep";
 
 type OpenAIAnnotation = {
   type?: string;
@@ -233,7 +234,7 @@ async function structureResearch(args: {
   return parsed;
 }
 
-export async function enrichBusinessReferenceAsset(assetId: string) {
+async function enrichReferenceAsset(assetId: string) {
   const supabase = createAdminClient();
   const { data: asset, error: assetError } = await supabase
     .from("assets")
@@ -250,7 +251,7 @@ export async function enrichBusinessReferenceAsset(assetId: string) {
     ? metadata.enrichment_status
     : "pending";
   if (currentStatus === "complete") {
-    return { ok: true, skipped: true, reason: "already_complete" };
+    return { ok: true, skipped: true, reason: "already_complete", leadId: asset.lead_id };
   }
 
   const startedAt = new Date().toISOString();
@@ -316,6 +317,7 @@ export async function enrichBusinessReferenceAsset(assetId: string) {
       skipped: false,
       profile,
       sources: research.sources,
+      leadId: asset.lead_id,
     };
   } catch (error) {
     const failedAt = new Date().toISOString();
@@ -338,4 +340,11 @@ export async function enrichBusinessReferenceAsset(assetId: string) {
     }
     throw error;
   }
+}
+
+export async function enrichBusinessReferenceAsset(assetId: string) {
+  const { leadId, ...enrichment } = await enrichReferenceAsset(assetId);
+  // Separate step, outside enrichment's catch. Complete assets also retry prep.
+  const proposalPrep = await tryPrepareVisualProposalDraft({ leadId, sourceAssetId: assetId });
+  return { ...enrichment, proposalPrep };
 }

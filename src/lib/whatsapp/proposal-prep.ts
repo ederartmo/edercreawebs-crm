@@ -141,9 +141,35 @@ type ProposalRow = {
 export function selectProposalTarget(rows: ProposalRow[]) {
   const latest = [...rows].sort((a, b) => b.version - a.version)[0];
   let generated = false;
-  try { generated = JSON.parse(latest?.direction_notes ?? "null")?.generator === PROPOSAL_GENERATOR; } catch { /* Foreign notes. */ }
+  let visual = false;
+  try {
+    const notes = JSON.parse(latest?.direction_notes ?? "null");
+    generated = notes?.generator === PROPOSAL_GENERATOR;
+    visual = notes?.generator === "visual_generator_v1";
+  } catch { /* Foreign notes. */ }
+  // Do not allocate a competing draft while this version is being prepared/rendered.
+  const blocked = latest && (visual || ["preparing", "visual_in_progress"].includes(latest.status)) ? latest : null;
   const reusable = latest?.status === "draft" && !latest.approved_at && !latest.sent_at && generated;
-  return { existing: reusable ? latest : null, version: reusable ? latest.version : (latest?.version ?? 0) + 1 };
+  return { blocked, existing: reusable ? latest : null, version: reusable ? latest.version : (latest?.version ?? 0) + 1 };
+}
+
+// INSERT never replaces a row; UPDATE predicates are evaluated by Postgres at write time.
+// Even a writer that passed an earlier check cannot erase a newly reserved section.
+export async function persistPendingProposalSections(
+  supabase: ReturnType<typeof createAdminClient>, proposalId: string, brief: ProposalBrief,
+) {
+  for (const row of proposalSectionRows(proposalId, brief)) {
+    const inserted = await supabase.from("visual_proposal_sections").insert(row);
+    if (!inserted.error) continue;
+    if (inserted.error.code !== "23505") throw new Error("Section insert failed");
+    const updated = await supabase.from("visual_proposal_sections")
+      .update({ brief: row.brief, title: row.title, section_type: row.section_type })
+      .eq("proposal_id", proposalId).eq("position", row.position)
+      .eq("status", "pending").is("asset_id", null).select("id").maybeSingle();
+    if (updated.error) throw new Error("Section update failed");
+    if (!updated.data) return false;
+  }
+  return true;
 }
 
 export function proposalSectionRows(proposalId: string, brief: ProposalBrief) {
@@ -222,6 +248,7 @@ export async function prepareVisualProposalDraft(args: { leadId: string; sourceA
   }).select("id").single();
   if (run.error || !run.data) throw new Error("Could not start proposal automation run");
   let stage = "load_context";
+  let ownedProposal: { id: string; notes: string } | null = null;
   try {
     const leadResult = await supabase.from("leads")
       .select("id,owner_id,project_type,original_message,what_sells,how_sells,main_problem,main_goal,requested_features")
@@ -266,9 +293,17 @@ export async function prepareVisualProposalDraft(args: { leadId: string; sourceA
         .eq("lead_id", args.leadId).eq("owner_id", lead.owner_id).order("version", { ascending: false });
       if (rows.error) throw rows.error;
       const target = selectProposalTarget(rows.data ?? []);
+      if (target.blocked) {
+        const output = { proposal_id: target.blocked.id, version: target.blocked.version,
+          reused: true, status: "visual_or_prep_in_progress" };
+        const done = await supabase.from("automation_runs").update({ status: "completed", output,
+          finished_at: new Date().toISOString() }).eq("id", run.data.id);
+        if (done.error) throw done.error;
+        return output;
+      }
       const payload = { project_type: brief.project_type, direction_notes: JSON.stringify(brief) };
       if (target.existing) {
-        const saved = await supabase.from("visual_proposals").update(payload)
+        const saved = await supabase.from("visual_proposals").update({ status: "preparing" })
           .eq("id", target.existing.id).eq("status", "draft")
           .is("approved_at", null).is("sent_at", null)
           .eq("direction_notes", target.existing.direction_notes!)
@@ -276,34 +311,56 @@ export async function prepareVisualProposalDraft(args: { leadId: string; sourceA
         if (saved.error) throw saved.error;
         proposal = saved.data;
         reused = !!proposal;
+        if (proposal) {
+          ownedProposal = { id: proposal.id, notes: target.existing.direction_notes! };
+          const sections = await supabase.from("visual_proposal_sections").select("status,asset_id")
+            .eq("proposal_id", proposal.id);
+          if (sections.error) throw sections.error;
+          if (sections.data?.some(row => row.status !== "pending" || row.asset_id)) {
+            const released = await supabase.from("visual_proposals").update({ status: "draft" })
+              .eq("id", proposal.id).eq("status", "preparing").eq("direction_notes", ownedProposal.notes);
+            if (released.error) throw released.error;
+            ownedProposal = null;
+            const output = { proposal_id: proposal.id, version: proposal.version, reused: true, status: "protected_sections" };
+            const done = await supabase.from("automation_runs").update({ status: "completed", output,
+              finished_at: new Date().toISOString() }).eq("id", run.data.id);
+            if (done.error) throw done.error;
+            return output;
+          }
+          const written = await supabase.from("visual_proposals").update(payload)
+            .eq("id", proposal.id).eq("status", "preparing").eq("direction_notes", ownedProposal.notes)
+            .select("id").single();
+          if (written.error || !written.data) throw new Error("Prep reservation lost");
+          ownedProposal.notes = payload.direction_notes;
+        }
       } else {
         const saved = await supabase.from("visual_proposals").insert({
-          owner_id: lead.owner_id, lead_id: args.leadId, version: target.version, status: "draft", ...payload,
+          owner_id: lead.owner_id, lead_id: args.leadId, version: target.version, status: "preparing", ...payload,
         }).select("id,version").single();
         if (saved.error && saved.error.code !== "23505") throw saved.error;
         proposal = saved.data;
+        if (proposal) ownedProposal = { id: proposal.id, notes: payload.direction_notes };
       }
     }
     if (!proposal) throw new Error("Proposal concurrent write conflict");
     stage = "persist_sections";
     const expectedSections = proposalSectionRows(proposal.id, brief);
     const current = await supabase.from("visual_proposals").select("id")
-      .eq("id", proposal.id).eq("status", "draft").is("approved_at", null).is("sent_at", null)
+      .eq("id", proposal.id).eq("status", "preparing").is("approved_at", null).is("sent_at", null)
       .eq("direction_notes", JSON.stringify(brief)).maybeSingle();
     if (current.error || !current.data) throw new Error("Proposal changed before section persistence");
-    const sections = await supabase.from("visual_proposal_sections")
-      .upsert(expectedSections, { onConflict: "proposal_id,position" });
-    if (sections.error) throw sections.error;
+    if (!await persistPendingProposalSections(supabase, proposal.id, brief)) throw new Error("Section protected during prep");
     const stored = await supabase.from("visual_proposal_sections").select("position,brief")
       .eq("proposal_id", proposal.id).order("position");
     if (stored.error || JSON.stringify(stored.data?.map(row => row.position)) !== "[1,2,3,4]"
       || stored.data?.some((row, index) => row.brief !== expectedSections[index].brief)) {
       throw new Error("Persisted proposal must contain exactly four sections");
     }
-    const consistent = await supabase.from("visual_proposals").select("id")
-      .eq("id", proposal.id).eq("status", "draft").is("approved_at", null).is("sent_at", null)
+    const consistent = await supabase.from("visual_proposals").update({ status: "draft" }).select("id")
+      .eq("id", proposal.id).eq("status", "preparing").is("approved_at", null).is("sent_at", null)
       .eq("direction_notes", JSON.stringify(brief)).maybeSingle();
     if (consistent.error || !consistent.data) throw new Error("Proposal changed during section persistence");
+    ownedProposal = null;
     stage = "complete_run";
     const output = { proposal_id: proposal.id, version: proposal.version, reused,
       section_count: 4, ready_for_visual_generation: brief.ready_for_visual_generation };
@@ -314,6 +371,11 @@ export async function prepareVisualProposalDraft(args: { leadId: string; sourceA
     // Do not advance lead status: a brief is not a generated visual proposal.
     return output;
   } catch {
+    if (ownedProposal) {
+      // No TTL takeover. A hard process death leaves preparing for operator recovery.
+      await supabase.from("visual_proposals").update({ status: "draft" })
+        .eq("id", ownedProposal.id).eq("status", "preparing").eq("direction_notes", ownedProposal.notes);
+    }
     const failed = await supabase.from("automation_runs").update({
       status: "failed", error: `proposal_prep_failed:${stage}`, finished_at: new Date().toISOString(),
     }).eq("id", run.data.id);

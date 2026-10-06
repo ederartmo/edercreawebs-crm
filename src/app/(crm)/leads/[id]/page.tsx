@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/page-header";
 import { createClient } from "@/lib/supabase/server";
 import { formatDate, formatMoney, humanizeStatus } from "@/lib/format";
+import { evaluateIntakeReadiness, type IntakeData } from "@/lib/intake/domain";
 import { notFound } from "next/navigation";
 import { AnalyzeLeadButton } from "./analyze-lead-button";
 
@@ -24,6 +25,12 @@ type LatestCommercialAnalysis = {
   reasons: string[];
 };
 
+type LeadIntake = {
+  answers?: Record<string, unknown>;
+  first_touch?: Record<string, unknown>;
+  ready_for_quote?: boolean;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -43,6 +50,60 @@ function getStringList(value: unknown) {
   return value
     .map((item) => getText(item))
     .filter((item): item is string => Boolean(item));
+}
+
+function parseLeadIntake(value: unknown): LeadIntake {
+  if (!isRecord(value)) return {};
+  return {
+    answers: isRecord(value.answers) ? value.answers : {},
+    first_touch: isRecord(value.first_touch) ? value.first_touch : {},
+    ready_for_quote: value.ready_for_quote === true,
+  };
+}
+
+function leadDescription(value: unknown, fallback: string) {
+  const text = getText(value);
+  if (!text) return fallback;
+  try {
+    const parsed = JSON.parse(text);
+    if (isRecord(parsed) && ("known_fields" in parsed || "ready_for_quote" in parsed)) {
+      return fallback;
+    }
+  } catch {
+    // Keep ordinary conversation summaries as written.
+  }
+  return text;
+}
+
+const budgetLabels: Record<string, string> = {
+  menos_de_15k: "Menos de $15,000 MXN",
+  "15k_20k": "$15,000–$20,000 MXN",
+  "20k_35k": "$20,000–$35,000 MXN",
+  "35k_50k": "$35,000–$50,000 MXN",
+  "50k_plus": "Más de $50,000 MXN",
+};
+
+const missingFieldLabels: Record<string, string> = {
+  identity: "Contacto",
+  what_sells: "Qué vende",
+  customer_acquisition: "Cómo consigue clientes",
+  how_sells: "Cómo vende",
+  objective: "Objetivo principal",
+  budget_range: "Inversión contemplada",
+  timing: "Inicio",
+  reference: "Presencia digital",
+};
+
+function timingLabel(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return "Por definir";
+  const labels: Record<string, string> = {
+    lo_antes_posible: "Lo antes posible",
+    este_mes: "Este mes",
+    en_1_2_meses: "En 1–2 meses",
+    en_3_meses_o_mas: "En 3 meses o más",
+    solo_estoy_explorando: "Solo estoy explorando",
+  };
+  return labels[value] ?? value;
 }
 
 function parseLatestAnalysisInput(value: unknown): LatestAnalysisInput {
@@ -143,6 +204,34 @@ export default async function LeadDetailPage({
   const business = Array.isArray(lead.businesses)
     ? lead.businesses[0]
     : lead.businesses;
+  const leadIntake = parseLeadIntake(lead.intake);
+  const intakeAnswers = leadIntake.answers ?? {};
+  const intakeData: IntakeData = {
+    ...(typeof lead.what_sells === "string" ? { what_sells: lead.what_sells } : {}),
+    ...(typeof lead.how_sells === "string" ? { how_sells: lead.how_sells } : {}),
+    ...(typeof lead.main_problem === "string" ? { main_problem: lead.main_problem } : {}),
+    ...(typeof lead.main_goal === "string" ? { main_goal: lead.main_goal } : {}),
+    ...(typeof contact?.full_name === "string" ? { name: contact.full_name } : {}),
+    ...(typeof contact?.email === "string" ? { email: contact.email } : {}),
+    ...(typeof contact?.phone === "string" ? { whatsapp: contact.phone } : {}),
+    ...(typeof business?.instagram_url === "string" ? { instagram: business.instagram_url } : {}),
+    ...(typeof business?.facebook_url === "string" ? { facebook: business.facebook_url } : {}),
+    ...(typeof business?.tiktok_url === "string" ? { tiktok: business.tiktok_url } : {}),
+    ...(typeof business?.website === "string" ? { website: business.website } : {}),
+    ...(typeof business?.google_business_url === "string" ? { google_business: business.google_business_url } : {}),
+    ...intakeAnswers,
+    ...(typeof contact?.phone === "string" ? { whatsapp: contact.phone } : {}),
+  } as IntakeData;
+  const intakeReadiness = evaluateIntakeReadiness(intakeData);
+  const intakeReady = leadIntake.ready_for_quote === true || intakeReadiness.ready_for_quote;
+  const intakeMissing = intakeReadiness.missing_fields.map((field) => missingFieldLabels[field] ?? field);
+  const digitalPresence = [
+    ["Instagram", intakeData.instagram],
+    ["Facebook", intakeData.facebook],
+    ["TikTok", intakeData.tiktok],
+    ["Sitio web", intakeData.website],
+    ["Google Business", intakeData.google_business],
+  ].filter(([, value]) => typeof value === "string" && value.trim());
   const latestAnalysisRun = latestAnalysisRuns?.[0] ?? null;
   const latestAnalysisInput = parseLatestAnalysisInput(latestAnalysisRun?.input);
   const latestAnalysisOutput = isRecord(latestAnalysisRun?.output)
@@ -163,7 +252,7 @@ export default async function LeadDetailPage({
       <PageHeader
         eyebrow={humanizeStatus(lead.status)}
         title={business?.name || contact?.full_name || contact?.phone || "Lead"}
-        description={lead.conversation_summary || lead.main_problem || "Sin resumen todavía."}
+        description={leadDescription(lead.conversation_summary, lead.main_problem || "Sin resumen todavía.")}
       />
 
       <section className="grid gap-6 xl:grid-cols-[1fr_1.5fr]">
@@ -173,21 +262,49 @@ export default async function LeadDetailPage({
             <dl className="mt-5 grid gap-4 text-sm">
               <div>
                 <dt className="text-gray-500">Qué vende</dt>
-                <dd className="mt-1 font-medium">{lead.what_sells || "Pendiente"}</dd>
+                <dd className="mt-1 font-medium">{intakeData.what_sells || "Pendiente"}</dd>
+              </div>
+              <div>
+                <dt className="text-gray-500">Cómo consigue clientes</dt>
+                <dd className="mt-1 font-medium">{intakeData.customer_acquisition || "Pendiente"}</dd>
               </div>
               <div>
                 <dt className="text-gray-500">Cómo vende</dt>
-                <dd className="mt-1 font-medium">{lead.how_sells || "Pendiente"}</dd>
+                <dd className="mt-1 font-medium">{intakeData.how_sells || "Pendiente"}</dd>
               </div>
               <div>
-                <dt className="text-gray-500">Hace anuncios</dt>
+                <dt className="text-gray-500">Objetivo principal</dt>
+                <dd className="mt-1 font-medium">{intakeData.main_goal || "Pendiente"}</dd>
+              </div>
+              <div>
+                <dt className="text-gray-500">Inversión contemplada</dt>
                 <dd className="mt-1 font-medium">
-                  {lead.runs_ads === null ? "Pendiente" : lead.runs_ads ? "Sí" : "No"}
+                  {typeof intakeData.budget_range === "string"
+                    ? budgetLabels[intakeData.budget_range] ?? intakeData.budget_range
+                    : "Por definir"}
                 </dd>
               </div>
               <div>
-                <dt className="text-gray-500">Problema principal</dt>
-                <dd className="mt-1 font-medium">{lead.main_problem || "Pendiente"}</dd>
+                <dt className="text-gray-500">Cuándo quiere iniciar</dt>
+                <dd className="mt-1 font-medium">{timingLabel(intakeData.timing)}</dd>
+              </div>
+              <div>
+                <dt className="text-gray-500">Presencia digital</dt>
+                <dd className="mt-1 font-medium">
+                  {digitalPresence.length > 0 ? (
+                    <ul className="space-y-1">
+                      {digitalPresence.map(([label, value]) => (
+                        <li key={label}>
+                          {label}: {value}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : intakeData.no_digital_presence === true ? (
+                    "Sin presencia digital actual"
+                  ) : (
+                    "Por definir"
+                  )}
+                </dd>
               </div>
               <div>
                 <dt className="text-gray-500">Tipo de proyecto</dt>
@@ -205,6 +322,17 @@ export default async function LeadDetailPage({
                 </dd>
               </div>
             </dl>
+            <div className="mt-6 border-t border-gray-100 pt-4 text-sm">
+              <p className="font-semibold text-gray-900">Estado del Intake</p>
+              <p className="mt-2 text-gray-600">
+                Completado: <span className="font-medium text-gray-900">{intakeReadiness.completion_percent}%</span>
+                {" · "}
+                Estado: <span className="font-medium text-gray-900">{intakeReady ? "Listo para cotización" : "En progreso"}</span>
+              </p>
+              {intakeMissing.length > 0 ? (
+                <p className="mt-1 text-gray-600">Faltan: {intakeMissing.join(", ")}</p>
+              ) : null}
+            </div>
           </article>
 
           <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">

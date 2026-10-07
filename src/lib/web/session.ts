@@ -54,6 +54,19 @@ async function closeAbandonedSession(db: ReturnType<typeof createAdminClient>, o
 }
 
 /**
+ * Whether this visit already recorded its server-side start. A reused session must never try to
+ * insert it again: that second insert is exactly what the partial unique index rejects with a 409.
+ * The index therefore stays as the secondary defense (races only), not the primary mechanism.
+ */
+async function sessionStartedRecorded(db: ReturnType<typeof createAdminClient>, owner: string, sessionId: string) {
+  try {
+    const result = await db.from("web_events").select("event_id").eq("owner_id", owner).eq("session_id", sessionId).eq("event_name", "session_started").limit(1);
+    if (result.error) return false;
+    return Array.isArray(result.data) && result.data.length > 0;
+  } catch { return false; }
+}
+
+/**
  * Best-effort and idempotent: the partial unique index makes every retry safe (23505 = already
  * recorded). Any other failure is swallowed so the session identity just created or reused keeps
  * working; the next create with the same cookie retries it. No error detail ever reaches the browser.
@@ -89,8 +102,9 @@ export async function createWebSession(input: CreateInput & { token?: string }) 
       if (input.fbp) patch.fbp = input.fbp;
       if (input.fbc) patch.fbc = input.fbc;
       checked(await db.from("web_sessions").update(patch).eq("owner_id", owner).eq("token_hash", hash));
-      // Repairs a session_started lost earlier without ever minting a second row.
-      await ensureSessionStarted(db, owner, existing.id, stamp);
+      // Same visit again (F5): session_started is only written when it is genuinely missing, so a
+      // reload never attempts the duplicate insert; it also repairs one lost earlier.
+      if (!(await sessionStartedRecorded(db, owner, existing.id))) await ensureSessionStarted(db, owner, existing.id, stamp);
       return { token: input.token, reference_code: existing.reference_code, status: existing.status, created: false };
     }
     // Ended or idle >= 30 min: keep the row historical and start a brand new visit below.

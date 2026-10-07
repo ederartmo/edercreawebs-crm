@@ -233,3 +233,99 @@ test("event and heartbeat require the cookie and are routed with it as the only 
   assert.equal((await api.post(event("stage_viewed"))).status, 400);
   assert.equal(service.calls.length, 2);
 });
+
+// PostgREST-shaped in-memory store: runs the real service without network or database.
+function memoryDb() {
+  const tables = { web_sessions: [], web_events: [] };
+  const attempts = [];
+  const matches = (row, filters) => filters.every(([key, value]) => row[key] === value);
+  const from = (table) => {
+    const filters = [];
+    let operation = "select", payload, single = false, cap;
+    const query = {
+      select() { return query; },
+      eq(key, value) { filters.push([key, value]); return query; },
+      limit(n) { cap = n; return query; },
+      maybeSingle() { single = true; return query; },
+      insert(value) { operation = "insert"; payload = value; return query; },
+      update(value) { operation = "update"; payload = value; return query; },
+      then(resolve, reject) {
+        return (async () => {
+          try {
+            if (operation === "insert") {
+              attempts.push({ table, payload });
+              // The real partial unique index: a second session_started for the same visit is 23505.
+              if (table === "web_events" && payload.event_name === "session_started"
+                && tables.web_events.some((row) => row.session_id === payload.session_id && row.event_name === "session_started")) {
+                return { data: null, error: { code: "23505" } };
+              }
+              const row = { ...payload };
+              if (table === "web_sessions") row.reference_code ??= `ECW-${crypto.randomBytes(5).toString("hex").toUpperCase()}`;
+              tables[table].push(row);
+              return { data: row, error: null };
+            }
+            if (operation === "update") {
+              for (const row of tables[table].filter((entry) => matches(entry, filters))) Object.assign(row, payload);
+              return { data: null, error: null };
+            }
+            const rows = tables[table].filter((entry) => matches(entry, filters));
+            const slice = cap === undefined ? rows : rows.slice(0, cap);
+            return { data: single ? slice[0] ?? null : slice, error: null };
+          } catch (error) { return { data: null, error }; }
+        })().then(resolve, reject);
+      },
+    };
+    return query;
+  };
+  const startedAttempts = () => attempts.filter((entry) => entry.table === "web_events" && entry.payload.event_name === "session_started");
+  return { from, tables, startedAttempts };
+}
+const webService = (db) => load("src/lib/web/session.ts", {
+  "server-only": {},
+  "@/lib/supabase/admin": { createAdminClient: () => db },
+  "@/lib/intake/tokens": tokens,
+}, { CRM_OWNER_ID: "owner-uuid", NEXT_PUBLIC_SUPABASE_URL: "https://ycdosrsanutbhbgejwwg.supabase.co" });
+const startedRows = (db) => db.tables.web_events.filter((entry) => entry.event_name === "session_started");
+
+test("create de una sesión nueva emite session_started exactamente una vez", async () => {
+  const db = memoryDb(), service = webService(db);
+  const created = await service.createWebSession({ action: "create" });
+  assert.equal(created.created, true);
+  assert.match(created.reference_code, /^ECW-[A-F0-9]{10}$/);
+  assert.equal(db.tables.web_sessions.length, 1);
+  assert.equal(startedRows(db).length, 1);
+  assert.equal(db.startedAttempts().length, 1);
+  assert.equal(startedRows(db)[0].source, "server");
+});
+
+test("reutilizar la sesión en un F5 no vuelve a intentar session_started y el heartbeat sigue vivo", async () => {
+  const db = memoryDb(), service = webService(db);
+  const created = await service.createWebSession({ action: "create" });
+  const attemptsBeforeReload = db.startedAttempts().length;
+  assert.equal(attemptsBeforeReload, 1, "el create inicial sí emite session_started");
+  const reloaded = await service.createWebSession({ action: "create", token: created.token, current_path: "/segunda" });
+
+  assert.equal(reloaded.created, false, "el F5 reutiliza la fila, no crea otra visita");
+  assert.equal(reloaded.reference_code, created.reference_code);
+  assert.equal(db.tables.web_sessions.length, 1);
+  assert.equal(startedRows(db).length, 1);
+  // Root cause: the reuse branch inserted a second session_started, which the unique index rejected with 409.
+  assert.equal(db.startedAttempts().length, attemptsBeforeReload, "la reutilización ni siquiera intenta el insert");
+
+  db.tables.web_sessions[0].last_seen_at = new Date(Date.now() - 60_000).toISOString();
+  const beat = await service.heartbeatWebSession(created.token, { action: "heartbeat", current_path: "/precios" });
+  assert.equal(beat.ok, true);
+  assert.equal(db.tables.web_sessions[0].current_path, "/precios");
+  assert.equal(startedRows(db).length, 1, "el heartbeat tampoco emite session_started");
+});
+
+test("un session_started perdido se repara en la siguiente reutilización sin duplicarlo", async () => {
+  const db = memoryDb(), service = webService(db);
+  const created = await service.createWebSession({ action: "create" });
+  db.tables.web_events.length = 0; // el insert inicial se perdió
+  const again = await service.createWebSession({ action: "create", token: created.token });
+
+  assert.equal(again.created, false);
+  assert.equal(db.startedAttempts().length, 2, "solo reintenta cuando realmente falta");
+  assert.equal(startedRows(db).length, 1, "nunca queda duplicado");
+});

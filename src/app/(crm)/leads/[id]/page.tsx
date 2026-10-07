@@ -4,6 +4,7 @@ import { formatDate, formatMoney, humanizeStatus } from "@/lib/format";
 import { evaluateIntakeReadiness, type IntakeData } from "@/lib/intake/domain";
 import { notFound } from "next/navigation";
 import { AnalyzeLeadButton } from "./analyze-lead-button";
+import { PrepareQuoteButton } from "./prepare-quote-button";
 
 type LatestAnalysisInput = {
   messageCount: number | null;
@@ -470,7 +471,10 @@ export default async function LeadDetailPage({
           </article>
 
           <article className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-            <h2 className="font-bold">Cotizaciones y pagos</h2>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="font-bold">Cotizaciones y pagos</h2>
+              <PrepareQuoteButton leadId={id} />
+            </div>
             <div className="mt-4 space-y-3">
               {(quotes ?? []).map((quote) => (
                 <div key={quote.id} className="rounded-xl border border-gray-100 p-4">

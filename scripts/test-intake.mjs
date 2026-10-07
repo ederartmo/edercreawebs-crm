@@ -49,6 +49,12 @@ test("CTWA captures allowlisted referral; absent referral remains valid", () => 
 test("browser cannot supply lead/owner/status/price/confirmed fields", () => {
   for (const input of [{ action: "save", lead_id: crypto.randomUUID() }, { action: "save", answers: { owner_id: "other" } }, { action: "save", answers: { status: "calificado" } }, { action: "save", answers: { suggested_price: 15000 } }, { action: "save", answers: { confirmed: true } }, { action: "save", attribution: { source: "direct" } }]) assert.throws(() => web.parseWebIntakeInput(input));
   assert.throws(() => web.parseWebIntakeInput({ action: "save", answers: { name: "x".repeat(1201) } }));
+  assert.equal(web.parseWebIntakeInput({ action: "finalize" }).action, "finalize");
+  assert.throws(() => web.parseWebIntakeInput({ action: "finalize", answers: { timing: "October" } }));
+  const edit = web.parseWebIntakeInput({ action: "save", mode: "edit", field: "what_sells", value: " Corregido " });
+  assert.deepEqual(copy(edit), { action: "save", mode: "edit", field: "what_sells", value: "Corregido" });
+  assert.throws(() => web.parseWebIntakeInput({ action: "save", mode: "edit", field: "budget_range", value: "25k_30k" }));
+  assert.throws(() => web.parseWebIntakeInput({ action: "save", mode: "edit", field: "what_sells", value: 42 }));
 });
 test("session and continuation tokens are random, opaque, hashed and redacted", () => {
   const token = tokens.createSessionToken(), code = tokens.createContinuationCode();
@@ -57,6 +63,135 @@ test("session and continuation tokens are random, opaque, hashed and redacted", 
   assert.equal(tokens.extractContinuationCode(`Hola ${code.toLowerCase()}`), code);
   assert.ok(!tokens.redactContinuationCode(`Hola ${code}`).includes(code));
   assert.doesNotMatch(code, /[a-f0-9]{8}-[a-f0-9]{4}-/i);
+});
+
+function webSessionService() {
+  const db = database();
+  for (const table of ["intake_sessions", "contacts", "businesses", "leads", "tasks"]) db.tables[table] = [];
+  db.failMaterialization = false;
+  db.rpc = async (name, args) => {
+    if (name === "intake_create_session") {
+      db.tables.intake_sessions.push({ owner_id: args.p_owner, token_hash: args.p_hash, first_touch: args.p_attribution, answers: {}, lead_id: null, materialized_at: null, updated_at: new Date().toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString() });
+      return { data: null, error: null };
+    }
+    const session = db.tables.intake_sessions.find(row => row.owner_id === args.p_owner && row.token_hash === args.p_hash);
+    if (!session) return { data: null, error: Error("session_unavailable") };
+    if (name === "intake_save_session") {
+      if (session.lead_id && session.materialized_at) return { data: null, error: null };
+      if (session.lead_id) return { data: null, error: Error("session_unavailable") };
+      session.answers = { ...args.p_answers, ...session.answers };
+      session.updated_at = new Date().toISOString();
+      return { data: null, error: null };
+    }
+    if (name === "intake_materialize_session") {
+      if (db.failMaterialization) return { data: null, error: Error("task insert failed") };
+      if (session.lead_id) return { data: session.lead_id, error: null };
+      if (JSON.stringify(session.answers) !== JSON.stringify(args.p_expected_answers)) return { data: null, error: null };
+      const leadId = `lead-${db.tables.leads.length + 1}`;
+      const contactId = `contact-${db.tables.contacts.length + 1}`;
+      db.tables.contacts.push({ id: contactId, owner_id: args.p_owner, full_name: session.answers.name, email: session.answers.email, phone: null });
+      db.tables.leads.push({ id: leadId, owner_id: args.p_owner, contact_id: contactId, what_sells: session.answers.what_sells, intake: { ready_for_quote: true } });
+      db.tables.tasks.push({ id: `task-${db.tables.tasks.length + 1}`, owner_id: args.p_owner, lead_id: leadId, title: "Revisar proyecto y preparar cotización", automation_key: "intake-v1-ready-for-quote" });
+      session.lead_id = leadId;
+      session.materialized_at = new Date().toISOString();
+      session.answers = {};
+      session.first_touch = {};
+      session.updated_at = new Date().toISOString();
+      return { data: leadId, error: null };
+    }
+    return { data: null, error: Error(`unexpected rpc ${name}`) };
+  };
+  const service = load("src/lib/intake/service.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "./domain": d, "./tokens": tokens }, { CRM_OWNER_ID: "owner", NEXT_PUBLIC_SUPABASE_URL: "https://ycdosrsanutbhbgejwwg.supabase.co" });
+  return { db, service };
+}
+
+test("web save and GET return complete readiness without materializing; finalize is explicit and idempotent", async () => {
+  const { db, service } = webSessionService();
+  const { token } = await service.createIntakeSession({ source: "direct", entry_channel: "web" });
+  const saved = await service.saveSessionAnswer(token, complete);
+  assert.equal(saved.ready_for_quote, true); assert.equal(saved.materialized, false); assert.equal(saved.status, "complete");
+  assert.equal((await service.getIntakeSession(token)).ready_for_quote, true);
+  assert.equal(db.tables.leads.length, 0); assert.equal(db.tables.tasks.length, 0);
+
+  const finalized = await service.finalizeIntakeSession(token);
+  const repeated = await service.finalizeIntakeSession(token);
+  assert.equal(finalized.materialized, true); assert.equal(repeated.materialized, true);
+  assert.equal(finalized.linked, true); assert.equal(db.tables.leads.length, 1); assert.equal(db.tables.tasks.length, 1);
+  assert.equal(db.tables.tasks[0].title, "Revisar proyecto y preparar cotización");
+});
+
+test("explicit edit replaces one staged answer, recalculates readiness, and finalize materializes the correction", async () => {
+  const { db, service } = webSessionService();
+  const { token } = await service.createIntakeSession({ source: "direct", entry_channel: "web" });
+  await service.saveSessionAnswer(token, complete);
+
+  const ordinarySave = await service.saveSessionAnswer(token, { what_sells: "No debe sobrescribir" });
+  assert.equal(ordinarySave.known_fields.what_sells, "Muebles");
+  const edited = await service.editSessionAnswer(token, "what_sells", "Creo sistemas web para PyMEs");
+  assert.equal(edited.known_fields.what_sells, "Creo sistemas web para PyMEs");
+  assert.equal(edited.known_fields.main_goal, complete.main_goal);
+  assert.equal(edited.known_fields.budget_range, complete.budget_range);
+
+  await assert.rejects(service.editSessionAnswer(token, "budget_range", "25k_30k"), /invalid_intake_edit/);
+  assert.equal((await service.getIntakeSession(token)).known_fields.what_sells, "Creo sistemas web para PyMEs");
+
+  const incomplete = await service.editSessionAnswer(token, "what_sells", "");
+  assert.equal(incomplete.ready_for_quote, false); assert.ok(incomplete.missing_fields.includes("what_sells"));
+  const restored = await service.editSessionAnswer(token, "what_sells", "Creo sistemas web para PyMEs");
+  assert.equal(restored.ready_for_quote, true);
+
+  const materialized = await service.finalizeIntakeSession(token);
+  const repeated = await service.finalizeIntakeSession(token);
+  assert.equal(materialized.materialized, true); assert.equal(repeated.materialized, true);
+  assert.equal(db.tables.leads[0].what_sells, "Creo sistemas web para PyMEs");
+  assert.equal(db.tables.leads.length, 1); assert.equal(db.tables.tasks.length, 1);
+  await assert.rejects(service.editSessionAnswer(token, "what_sells", "After finalize"), /intake_session_materialized/);
+  assert.equal(db.tables.leads[0].what_sells, "Creo sistemas web para PyMEs");
+  assert.equal(db.tables.tasks.length, 1);
+});
+
+test("finalize incomplete returns missing fields without materializing; post-finalize saves are no-op", async () => {
+  const { db, service } = webSessionService();
+  const { token } = await service.createIntakeSession({ source: "direct", entry_channel: "web" });
+  const incomplete = { ...complete }; delete incomplete.timing;
+  await service.saveSessionAnswer(token, incomplete);
+  const rejected = await service.finalizeIntakeSession(token);
+  assert.equal(rejected.ready_for_quote, false); assert.equal(rejected.materialized, false); assert.ok(rejected.missing_fields.includes("timing"));
+  assert.equal(db.tables.leads.length, 0); assert.equal(db.tables.tasks.length, 0);
+
+  await service.saveSessionAnswer(token, { timing: complete.timing });
+  const finalized = await service.finalizeIntakeSession(token);
+  await service.saveSessionAnswer(token, { timing: "changed" });
+  assert.equal(finalized.materialized, true); assert.equal(db.tables.leads.length, 1); assert.equal(db.tables.tasks.length, 1);
+  assert.equal(db.tables.intake_sessions[0].answers.timing, undefined);
+});
+
+test("a failed materialization leaves a ready session staged for a safe finalize retry", async () => {
+  const { db, service } = webSessionService();
+  const { token } = await service.createIntakeSession({ source: "direct", entry_channel: "web" });
+  await service.saveSessionAnswer(token, complete);
+  db.failMaterialization = true;
+  await assert.rejects(service.finalizeIntakeSession(token), /intake_storage_failed/);
+  assert.equal(db.tables.leads.length, 0); assert.equal(db.tables.tasks.length, 0);
+  assert.equal((await service.getIntakeSession(token)).ready_for_quote, true);
+  db.failMaterialization = false;
+  assert.equal((await service.finalizeIntakeSession(token)).materialized, true);
+  assert.equal(db.tables.leads.length, 1); assert.equal(db.tables.tasks.length, 1);
+});
+
+test("an already materialized legacy session returns its receipt without reinserting CRM rows", async () => {
+  const { db, service } = webSessionService();
+  const { token } = await service.createIntakeSession({ source: "direct", entry_channel: "web" });
+  const session = db.tables.intake_sessions[0];
+  session.lead_id = "legacy-lead";
+  session.materialized_at = new Date().toISOString();
+  db.tables.leads.push({ id: "legacy-lead", owner_id: "owner" });
+  db.tables.tasks.push({ id: "legacy-task", owner_id: "owner", lead_id: "legacy-lead", automation_key: "intake-v1-ready-for-quote" });
+
+  const read = await service.getIntakeSession(token);
+  const finalized = await service.finalizeIntakeSession(token);
+  assert.equal(read.materialized, true); assert.equal(finalized.materialized, true);
+  assert.equal(db.tables.leads.length, 1); assert.equal(db.tables.tasks.length, 1);
 });
 
 test("canonical projection reuses CRM fields and real uploads, never generated references", async () => {
@@ -72,7 +207,7 @@ test("canonical projection reuses CRM fields and real uploads, never generated r
   db.tables.assets.push({ owner_id: "owner", lead_id: "lead", category: "image", source: "whatsapp_import", storage_path: "photo.jpg", mime_type: "image/jpeg" });
   assert.equal((await service.getLeadIntake("lead")).ready_for_quote, true);
   db.tables.intake_sessions = [{ owner_id: "owner", token_hash: tokens.hashToken("test"), lead_id: "lead", expires_at: "2099-01-01", answers: {} }];
-  assert.deepEqual(copy(await service.getIntakeSession("test")), { linked: true });
+  assert.deepEqual(copy(await service.getIntakeSession("test")), { linked: true, materialized: false, status: "linked", ready_for_quote: false, completion_percent: 0, missing_fields: [], intake_version: 1 });
 });
 
 function agent(initial, responses = []) {
@@ -146,6 +281,36 @@ test("web endpoint enforces cookie capability, origin, payload limit and rejects
   assert.equal((await route.POST(req({ action: "save", lead_id: "arbitrary" }))).status, 400);
   assert.equal((await route.POST(req({ action: "save" }, "https://evil.test"))).status, 403);
   assert.equal((await route.POST(req("x".repeat(12001)))).status, 413); assert.equal(calls, 0);
+});
+
+test("web endpoint routes action finalize through the explicit service method", async () => {
+  let calls = 0;
+  const route = load("src/app/api/intake/session/route.ts", {
+    "next/server": { NextResponse: { json: (data, options = {}) => ({ data, status: options.status ?? 200, cookies: { set() {} } }) } },
+    "next/headers": { cookies: async () => ({ get: () => ({ value: "a".repeat(64) }) }) },
+    "@/lib/intake/web": web,
+    "@/lib/intake/service": { finalizeIntakeSession: async () => { calls++; return { linked: true, materialized: true, ready_for_quote: true }; } },
+  }, { INTAKE_WEB_ENABLED: "true", INTAKE_WEB_ORIGIN: "https://example.com" });
+  const result = await route.POST(new Request("https://example.com/api/intake/session", { method: "POST", headers: { origin: "https://example.com", "content-type": "application/json" }, body: JSON.stringify({ action: "finalize" }) }));
+  assert.equal(result.status, 200); assert.equal(result.data.materialized, true); assert.equal(calls, 1);
+});
+
+test("web endpoint routes explicit save edits without changing the normal save action", async () => {
+  let editCall;
+  const route = load("src/app/api/intake/session/route.ts", {
+    "next/server": { NextResponse: { json: (data, options = {}) => ({ data, status: options.status ?? 200, cookies: { set() {} } }) } },
+    "next/headers": { cookies: async () => ({ get: () => ({ value: "a".repeat(64) }) }) },
+    "@/lib/intake/web": web,
+    "@/lib/intake/service": {
+      editSessionAnswer: async (_token, field, value) => { editCall = { field, value }; return { ready_for_quote: true, known_fields: { [field]: value } }; },
+      saveSessionAnswer: async (_token, answers) => ({ ready_for_quote: false, known_fields: answers }),
+    },
+  }, { INTAKE_WEB_ENABLED: "true", INTAKE_WEB_ORIGIN: "https://example.com" });
+  const request = body => new Request("https://example.com/api/intake/session", { method: "POST", headers: { origin: "https://example.com", "content-type": "application/json" }, body: JSON.stringify(body) });
+  const editResponse = await route.POST(request({ action: "save", mode: "edit", field: "what_sells", value: "  Corregido  " }));
+  assert.equal(editResponse.status, 200); assert.deepEqual(editCall, { field: "what_sells", value: "Corregido" });
+  const saveResponse = await route.POST(request({ action: "save", answers: { what_sells: "Normal" } }));
+  assert.equal(saveResponse.status, 200); assert.equal(saveResponse.data.known_fields.what_sells, "Normal");
 });
 
 test("webhook captures CTWA, consumes/redacts continuation and preserves advanced status on legacy handoff", async () => {

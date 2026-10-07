@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createIntakeSession, getIntakeSession, issueContinuation, saveSessionAnswer } from "@/lib/intake/service";
+import { createIntakeSession, editSessionAnswer, finalizeIntakeSession, getIntakeSession, issueContinuation, saveSessionAnswer } from "@/lib/intake/service";
 import { parseWebIntakeInput } from "@/lib/intake/web";
 
 export const runtime = "nodejs";
@@ -47,6 +47,9 @@ export async function POST(request: Request) {
       return response;
     }
     const sessionToken = await token();
-    return NextResponse.json(input.action === "continue" ? await issueContinuation(sessionToken) : await saveSessionAnswer(sessionToken, input.answers), { headers });
+    if (input.action === "continue") return NextResponse.json(await issueContinuation(sessionToken), { headers });
+    if (input.action === "finalize") return NextResponse.json(await finalizeIntakeSession(sessionToken), { headers });
+    if ("mode" in input && input.mode === "edit") return NextResponse.json(await editSessionAnswer(sessionToken, input.field, input.value), { headers });
+    return NextResponse.json(await saveSessionAnswer(sessionToken, input.answers), { headers });
   } catch { return NextResponse.json({ error: "invalid_or_unavailable_session" }, { status: 400, headers }); }
 }

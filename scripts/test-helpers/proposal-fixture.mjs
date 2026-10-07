@@ -49,6 +49,12 @@ function database() {
       select() { return query; },
       eq(key, value) { filters.push(row => row[key] === value); return query; },
       is(key, value) { filters.push(row => (row[key] ?? null) === value); return query; },
+      filter(key, operator, value) {
+        assert.equal(operator, "eq");
+        const expected = JSON.parse(value);
+        filters.push(row => JSON.stringify(row[key]) === JSON.stringify(expected));
+        return query;
+      },
       not(key, operator, value) {
         assert.equal(operator, "is");
         filters.push(row => (row[key] ?? null) !== value); return query;

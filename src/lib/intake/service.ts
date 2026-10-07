@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { captureAttribution, evaluateIntakeReadiness, mergeIntakeData, normalizeIntakeData, record, type Attribution, type IntakeData } from "./domain";
+import { captureAttribution, evaluateIntakeReadiness, mergeIntakeData, normalizeIntakeData, record, type Attribution, type IntakeData, type IntakeField } from "./domain";
 import { createContinuationCode, createSessionToken, hashToken } from "./tokens";
 
 function context() {
@@ -44,25 +44,79 @@ export async function createIntakeSession(attribution: Attribution) {
   const { db, owner } = context();
   const token = createSessionToken();
   checked(await db.rpc("intake_create_session", { p_owner: owner, p_hash: hashToken(token), p_attribution: captureAttribution({ source: "direct", ...attribution, entry_channel: "web" }) }));
-  return { token, ...evaluateIntakeReadiness({}) };
+  return { token, ...evaluateIntakeReadiness({}), linked: false as const, materialized: false as const, status: "incomplete" as const };
 }
+type WebIntakeSessionRow = {
+  answers: unknown;
+  first_touch: Attribution;
+  updated_at: string;
+  expires_at: string;
+  lead_id: string | null;
+  materialized_at: string | null;
+};
+
+async function loadWebIntakeSession(db: ReturnType<typeof createAdminClient>, owner: string, token: string) {
+  const session = checked(await db.from("intake_sessions").select("answers,first_touch,updated_at,expires_at,lead_id,materialized_at").eq("owner_id", owner).eq("token_hash", hashToken(token)).single()) as WebIntakeSessionRow | null;
+  if (!session || Date.parse(session.expires_at) <= Date.now()) throw Error("session_unavailable");
+  return session;
+}
+
+function materializedSessionReceipt() {
+  return { linked: true as const, materialized: true as const, status: "materialized" as const, ready_for_quote: true, completion_percent: 100, missing_fields: [], intake_version: 1 as const };
+}
+
+function linkedSessionState() {
+  return { linked: true as const, materialized: false as const, status: "linked" as const, ready_for_quote: false, completion_percent: 0, missing_fields: [] as string[], intake_version: 1 as const };
+}
+
+function stateFromWebSession(session: WebIntakeSessionRow) {
+  if (session.lead_id) return session.materialized_at ? materializedSessionReceipt() : linkedSessionState();
+  const readiness = evaluateIntakeReadiness(normalizeIntakeData(session.answers));
+  return {
+    ...readiness,
+    linked: false as const,
+    materialized: false as const,
+    status: readiness.ready_for_quote ? "complete" as const : "incomplete" as const,
+    first_touch: session.first_touch,
+    updated_at: session.updated_at,
+  };
+}
+
 export async function getIntakeSession(token: string) {
   const { db, owner } = context();
+  const session = await loadWebIntakeSession(db, owner, token);
+  return stateFromWebSession(session);
+}
+
+export async function finalizeIntakeSession(token: string) {
+  const { db, owner } = context();
   for (let attempt = 0; attempt < 4; attempt++) {
-    const session = checked(await db.from("intake_sessions").select("answers,first_touch,updated_at,expires_at,lead_id,materialized_at").eq("owner_id", owner).eq("token_hash", hashToken(token)).single());
-    if (!session || Date.parse(session.expires_at) <= Date.now()) throw Error("session_unavailable");
-    // Return only a receipt, never CRM facts or internal IDs, after linking.
-    if (session.lead_id) return session.materialized_at
-      ? { linked: true as const, ready_for_quote: true, completion_percent: 100, missing_fields: [], intake_version: 1 }
-      : { linked: true as const };
+    const session = await loadWebIntakeSession(db, owner, token);
+    if (session.lead_id) return session.materialized_at ? materializedSessionReceipt() : linkedSessionState();
+
     const readiness = evaluateIntakeReadiness(normalizeIntakeData(session.answers));
-    if (!readiness.ready_for_quote) return { linked: false as const, ...readiness, first_touch: session.first_touch, updated_at: session.updated_at };
-    // Also reconciles a prior save whose response/finalization was interrupted.
-    // SQL locks the session and compares this evaluated snapshot before any INSERT.
-    checked(await db.rpc("intake_materialize_session", {
-      p_owner: owner, p_hash: hashToken(token), p_expected_answers: session.answers,
+    if (!readiness.ready_for_quote) {
+      return {
+        ...readiness,
+        linked: false as const,
+        materialized: false as const,
+        status: "incomplete" as const,
+        first_touch: session.first_touch,
+        updated_at: session.updated_at,
+      };
+    }
+
+    const leadId = checked(await db.rpc("intake_materialize_session", {
+      p_owner: owner,
+      p_hash: hashToken(token),
+      p_expected_answers: session.answers,
       p_summary: JSON.stringify({ ...readiness, first_touch: session.first_touch }),
-    }));
+    })) as string | null;
+    if (!leadId) continue;
+
+    const result = await getIntakeSession(token);
+    if (result.materialized) return result;
+    if (result.linked) return result;
   }
   throw Error("intake_session_changed_retry");
 }
@@ -70,6 +124,35 @@ export async function saveSessionAnswer(token: string, answers: IntakeData) {
   const { db, owner } = context();
   checked(await db.rpc("intake_save_session", { p_owner: owner, p_hash: hashToken(token), p_answers: normalizeIntakeData(answers) }));
   return getIntakeSession(token);
+}
+export async function editSessionAnswer(token: string, field: IntakeField, value: string | boolean) {
+  const normalized = normalizeIntakeData({ [field]: value });
+  const clear = typeof value === "string" && value.trim() === "";
+  if (!clear && !(field in normalized)) throw Error("invalid_intake_edit");
+
+  const { db, owner } = context();
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const session = await loadWebIntakeSession(db, owner, token);
+    if (session.lead_id || session.materialized_at) throw Error("intake_session_materialized");
+
+    const nextAnswers = { ...record(session.answers) };
+    if (clear) delete nextAnswers[field];
+    else nextAnswers[field] = normalized[field] as string | boolean;
+
+    // Compare-and-swap on the full staging snapshot. A concurrent save/finalize
+    // either wins first (causing a retry) or observes this complete field edit.
+    const updated = checked(await db.from("intake_sessions")
+      .update({ answers: nextAnswers, updated_at: new Date().toISOString() })
+      .eq("owner_id", owner)
+      .eq("token_hash", hashToken(token))
+      .is("lead_id", null)
+      .is("materialized_at", null)
+      .filter("answers", "eq", JSON.stringify(session.answers))
+      .select("id")
+      .maybeSingle());
+    if (updated) return getIntakeSession(token);
+  }
+  throw Error("intake_session_changed_retry");
 }
 export async function issueContinuation(token: string) {
   await getIntakeSession(token);

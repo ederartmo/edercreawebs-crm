@@ -17,7 +17,7 @@ before(async () => {
   await pg.exec(`create role anon; create role authenticated; create role service_role bypassrls;
     create schema auth; create table auth.users(id uuid primary key);
     create function auth.uid() returns uuid language sql as 'select null::uuid';`);
-  for (const name of ["20260705000100_baseline_current_public_schema", "20260927000100_whatsapp_handoff_task", "20260927000200_whatsapp_agent_v2_handoff_task", "20261005200629_intake_v1"]) {
+  for (const name of ["20260705000100_baseline_current_public_schema", "20260927000100_whatsapp_handoff_task", "20260927000200_whatsapp_agent_v2_handoff_task", "20261005210820_intake_v1"]) {
     await pg.exec(fs.readFileSync(`supabase/migrations/${name}.sql`, "utf8"));
   }
 });
@@ -42,6 +42,7 @@ function sqlClient() {
         select() { return query; },
         eq(k, v) { filters.push([k, "=", v]); return query; },
         is(k, v) { assert.equal(v, null); filters.push([k, "is null"]); return query; },
+        filter(k, operator, value) { assert.equal(operator, "eq"); filters.push([k, "json_eq", JSON.parse(value)]); return query; },
         not(k, op, v) { assert.equal(op, "is"); assert.equal(v, null); filters.push([k, "is not null"]); return query; },
         in(k, v) { filters.push([k, "in", v]); return query; },
         order(k, options = {}) { orders.push(`${identifier(k)} ${options.ascending === false ? "desc" : "asc"}`); return query; },
@@ -57,7 +58,9 @@ function sqlClient() {
               let sql = `select * from ${identifier(table)}`;
               if (operation === "insert") sql = `insert into ${identifier(table)}(${Object.keys(payload).map(identifier).join(",")}) values(${Object.values(payload).map(bind).join(",")})`;
               if (operation === "update") sql = `update ${identifier(table)} set ${Object.entries(payload).map(([k, v]) => `${identifier(k)}=${bind(v)}`).join(",")}`;
-              if (filters.length) sql += " where " + filters.map(([k, op, v]) => `${identifier(k)} ${op} ${op === "in" ? `(${v.map(bind).join(",")})` : op === "=" ? bind(v) : ""}`).join(" and ");
+              if (filters.length) sql += " where " + filters.map(([k, op, v]) => op === "json_eq"
+                ? `${identifier(k)}=${bind(JSON.stringify(v))}::jsonb`
+                : `${identifier(k)} ${op} ${op === "in" ? `(${v.map(bind).join(",")})` : op === "=" ? bind(v) : ""}`).join(" and ");
               if (orders.length) sql += ` order by ${orders.join(",")}`;
               if (limit !== undefined) sql += ` limit ${limit}`;
               if (operation !== "select") sql += " returning *";
@@ -86,7 +89,12 @@ async function setup() {
   const service = load("src/lib/intake/service.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "./domain": d, "./tokens": tokens }, env);
   const { token } = await service.createIntakeSession(firstTouch);
   const rows = table => pg.query(`select * from ${table} where owner_id=$1`, [owner]).then(r => r.rows);
-  return { owner, db, env, service, token, rows, finish: () => service.saveSessionAnswer(token, complete) };
+  const saveComplete = (answers = complete) => service.saveSessionAnswer(token, answers);
+  const finish = async (answers = complete) => {
+    await saveComplete(answers);
+    return service.finalizeIntakeSession(token);
+  };
+  return { owner, db, env, service, token, rows, saveComplete, finish };
 }
 function webhook(ctx) {
   const replies = [];
@@ -122,6 +130,67 @@ sqlTest("1. web-only readiness creates contact, business and lead in CRM", async
   assert.equal(lead.human_required, true); assert.equal(lead.bot_mode, "paused"); assert.equal(lead.status, "nuevo");
   assert.equal((await ctx.rows("contacts"))[0].phone, null); // declared value is not verified transport
   assert.equal((await ctx.service.getLeadIntake(lead.id)).ready_for_quote, true);
+});
+sqlTest("save and GET keep a complete session staged until explicit finalize", async () => {
+  const ctx = await setup();
+  const saved = await ctx.saveComplete();
+  assert.equal(saved.ready_for_quote, true); assert.equal(saved.materialized, false); assert.equal(saved.status, "complete");
+  const reloaded = await ctx.service.getIntakeSession(ctx.token);
+  assert.equal(reloaded.ready_for_quote, true); assert.equal(reloaded.materialized, false);
+  for (const table of ["contacts", "businesses", "leads", "tasks"]) assert.equal((await ctx.rows(table)).length, 0);
+});
+sqlTest("finalize rejects incomplete sessions without CRM side effects", async () => {
+  const ctx = await setup(); const partial = { ...complete }; delete partial.timing;
+  await ctx.saveComplete(partial);
+  const result = await ctx.service.finalizeIntakeSession(ctx.token);
+  assert.equal(result.ready_for_quote, false); assert.equal(result.materialized, false); assert.ok(result.missing_fields.includes("timing"));
+  for (const table of ["contacts", "businesses", "leads", "tasks"]) assert.equal((await ctx.rows(table)).length, 0);
+});
+sqlTest("explicit edit replaces one staged answer, preserves others, recalculates readiness, and finalize uses the edit", async () => {
+  const ctx = await setup(); await ctx.saveComplete();
+  const ordinary = await ctx.service.saveSessionAnswer(ctx.token, { what_sells: "Normal save must remain fill-only" });
+  assert.equal(ordinary.known_fields.what_sells, complete.what_sells);
+
+  const replacement = "Creo sistemas web para PyMEs";
+  const edited = await ctx.service.editSessionAnswer(ctx.token, "what_sells", replacement);
+  assert.equal(edited.known_fields.what_sells, replacement);
+  assert.equal(edited.known_fields.main_goal, complete.main_goal);
+  assert.equal(edited.known_fields.budget_range, complete.budget_range);
+  assert.deepEqual((await ctx.rows("intake_sessions"))[0].answers.what_sells, replacement);
+
+  await assert.rejects(ctx.service.editSessionAnswer(ctx.token, "budget_range", "25k_30k"), /invalid_intake_edit/);
+  assert.equal((await ctx.service.getIntakeSession(ctx.token)).known_fields.what_sells, replacement);
+  const incomplete = await ctx.service.editSessionAnswer(ctx.token, "what_sells", "");
+  assert.equal(incomplete.ready_for_quote, false); assert.ok(incomplete.missing_fields.includes("what_sells"));
+  const restored = await ctx.service.editSessionAnswer(ctx.token, "what_sells", replacement);
+  assert.equal(restored.ready_for_quote, true);
+
+  await ctx.service.finalizeIntakeSession(ctx.token);
+  await ctx.service.finalizeIntakeSession(ctx.token);
+  const lead = (await ctx.rows("leads"))[0];
+  assert.equal(lead.what_sells, replacement);
+  assert.equal((await ctx.rows("leads")).length, 1); assert.equal((await ctx.rows("tasks")).length, 1);
+  await assert.rejects(ctx.service.editSessionAnswer(ctx.token, "what_sells", "After finalize"), /intake_session_materialized/);
+  assert.equal((await ctx.rows("leads"))[0].what_sells, replacement);
+  assert.equal((await ctx.rows("tasks")).length, 1);
+});
+sqlTest("finalize creates the lead and review task, and repeated finalize reuses both", async () => {
+  const ctx = await setup(); await ctx.saveComplete();
+  const [first, second] = await Promise.all([ctx.service.finalizeIntakeSession(ctx.token), ctx.service.finalizeIntakeSession(ctx.token)]);
+  assert.equal(first.materialized, true); assert.equal(second.materialized, true);
+  assert.equal((await ctx.rows("leads")).length, 1); assert.equal((await ctx.rows("tasks")).length, 1);
+  assert.equal((await ctx.rows("tasks"))[0].title, "Revisar proyecto y preparar cotización");
+  assert.equal((await ctx.rows("intake_sessions"))[0].lead_id, (await ctx.rows("leads"))[0].id);
+});
+sqlTest("a materialized legacy session remains a receipt and save is a safe no-op", async () => {
+  const ctx = await setup(); await ctx.finish();
+  const receipt = await ctx.service.getIntakeSession(ctx.token);
+  assert.equal(receipt.materialized, true); assert.equal(receipt.ready_for_quote, true);
+  const afterSave = await ctx.service.saveSessionAnswer(ctx.token, { timing: "Changed after finalization" });
+  const afterFinalize = await ctx.service.finalizeIntakeSession(ctx.token);
+  assert.equal(afterSave.materialized, true); assert.equal(afterFinalize.materialized, true);
+  assert.equal((await ctx.rows("leads")).length, 1); assert.equal((await ctx.rows("tasks")).length, 1);
+  assert.equal((await ctx.rows("leads"))[0].intake.answers.timing, "Octubre");
 });
 sqlTest("2. web-only creates Eder review task without conversation/WhatsApp", async () => {
   const ctx = await setup(); await ctx.finish();
@@ -182,7 +251,10 @@ sqlTest("10. incomplete web session stays staged without contact/lead/business/t
 });
 sqlTest("email-only readiness materializes without fake phone and can later bind signed WhatsApp", async () => {
   const ctx = await setup(); const emailOnly = { ...complete }; delete emailOnly.whatsapp;
-  assert.equal((await ctx.service.saveSessionAnswer(ctx.token, emailOnly)).ready_for_quote, true);
+  const saved = await ctx.service.saveSessionAnswer(ctx.token, emailOnly);
+  assert.equal(saved.ready_for_quote, true); assert.equal(saved.materialized, false);
+  assert.equal((await ctx.rows("leads")).length, 0);
+  await ctx.service.finalizeIntakeSession(ctx.token);
   const lead = (await ctx.rows("leads"))[0];
   const contact = (await ctx.rows("contacts"))[0];
   assert.equal(contact.phone, null);
@@ -206,6 +278,7 @@ sqlTest("separate sessions with the same unverified email remain isolated; each 
   for (const token of [ctx.token, other.token]) {
     await ctx.service.saveSessionAnswer(token, { ...answers, email: " ANA@EXAMPLE.COM " });
     await ctx.service.saveSessionAnswer(token, answers);
+    await ctx.service.finalizeIntakeSession(token);
   }
   const contacts = await ctx.rows("contacts");
   assert.equal(contacts.length, 2);
@@ -234,12 +307,15 @@ sqlTest("wrong sender/owner/expired ECW cannot create or steal a lead; same send
   assert.equal((await webhook(ctx).send(message)).data.ignored, 1);
   assert.equal((await ctx.rows("leads")).length, 1); assert.equal((await ctx.rows("tasks")).length, 1);
 });
-sqlTest("reload recovers saved-ready session; stale snapshot cannot materialize", async () => {
+sqlTest("GET leaves saved-ready session staged; stale snapshot cannot materialize before finalize", async () => {
   const ctx = await setup();
   await ctx.db.rpc("intake_save_session", { p_owner: ctx.owner, p_hash: tokens.hashToken(ctx.token), p_answers: complete });
   const stale = await ctx.db.rpc("intake_materialize_session", { p_owner: ctx.owner, p_hash: tokens.hashToken(ctx.token), p_expected_answers: { ...complete, timing: "wrong" }, p_summary: "stale" });
   assert.equal(stale.data, null); assert.equal((await ctx.rows("leads")).length, 0);
   assert.equal((await ctx.service.getIntakeSession(ctx.token)).ready_for_quote, true);
+  assert.equal((await ctx.rows("leads")).length, 0);
+  await ctx.service.finalizeIntakeSession(ctx.token);
+  assert.equal((await ctx.rows("leads")).length, 1);
   assert.equal((await ctx.rows("tasks")).length, 1);
 });
 sqlTest("ECW and final web submit serialized around one session cannot allocate two leads", async () => {
@@ -284,12 +360,22 @@ sqlTest("public final POST is idempotent and reload returns completed receipt", 
     "next/headers": { cookies: async () => ({ get: () => ({ value: ctx.token }) }) },
     "@/lib/intake/service": ctx.service, "@/lib/intake/web": load("src/lib/intake/web.ts", { "./domain": d }),
   }, { ...ctx.env, INTAKE_WEB_ENABLED: "true", INTAKE_WEB_ORIGIN: "https://example.com" });
+  const editResult = await route.POST(new Request("https://example.com/api/intake/session", { method: "POST", headers: { origin: "https://example.com", "content-type": "application/json" }, body: JSON.stringify({ action: "save", mode: "edit", field: "what_sells", value: "API corrected business" }) }));
+  assert.equal(editResult.status, 200); assert.equal(editResult.data.known_fields.what_sells, "API corrected business");
   for (let i = 0; i < 2; i++) {
     const result = await route.POST(new Request("https://example.com/api/intake/session", { method: "POST", headers: { origin: "https://example.com", "content-type": "application/json" }, body: JSON.stringify({ action: "save", answers: { timing: "Octubre" } }) }));
-    assert.equal(result.status, 200); assert.equal(result.data.ready_for_quote, true);
+    assert.equal(result.status, 200); assert.equal(result.data.ready_for_quote, true); assert.equal(result.data.materialized, false);
   }
-  assert.deepEqual(copy((await route.GET()).data), { linked: true, ready_for_quote: true, completion_percent: 100, missing_fields: [], intake_version: 1 });
+  assert.equal((await ctx.rows("leads")).length, 0); assert.equal((await ctx.rows("tasks")).length, 0);
+  for (let i = 0; i < 2; i++) {
+    const result = await route.POST(new Request("https://example.com/api/intake/session", { method: "POST", headers: { origin: "https://example.com", "content-type": "application/json" }, body: JSON.stringify({ action: "finalize" }) }));
+    assert.equal(result.status, 200); assert.equal(result.data.ready_for_quote, true); assert.equal(result.data.materialized, true);
+  }
+  assert.deepEqual(copy((await route.GET()).data), { linked: true, materialized: true, status: "materialized", ready_for_quote: true, completion_percent: 100, missing_fields: [], intake_version: 1 });
+  const postMaterializedEdit = await route.POST(new Request("https://example.com/api/intake/session", { method: "POST", headers: { origin: "https://example.com", "content-type": "application/json" }, body: JSON.stringify({ action: "save", mode: "edit", field: "what_sells", value: "Must not replace" }) }));
+  assert.equal(postMaterializedEdit.status, 400);
   assert.equal((await ctx.rows("leads")).length, 1); assert.equal((await ctx.rows("tasks")).length, 1);
+  assert.equal((await ctx.rows("leads"))[0].what_sells, "API corrected business");
 });
 sqlTest("ECW selects its exact web lead even when a newer lead exists for the same contact", async () => {
   const ctx = await setup(); await ctx.finish(); const webLead = (await ctx.rows("leads"))[0];
@@ -305,11 +391,14 @@ sqlTest("task failure rolls back all CRM materialization; reload retries once sa
     begin if new.owner_id='${ctx.owner}'::uuid then raise exception 'test_task_failure'; end if; return new; end; $$;
     create trigger test_fail_intake_task before insert on tasks for each row execute function public.test_fail_intake_task();`);
   try {
-    await assert.rejects(ctx.finish(), /intake_storage_failed/);
+    await ctx.saveComplete();
+    await assert.rejects(ctx.service.finalizeIntakeSession(ctx.token), /intake_storage_failed/);
     for (const table of ["contacts", "businesses", "leads", "tasks"]) assert.equal((await ctx.rows(table)).length, 0);
     const session = (await ctx.rows("intake_sessions"))[0]; assert.equal(session.lead_id, null);
     assert.equal(session.answers.timing, complete.timing);
   } finally { await pg.exec("drop trigger test_fail_intake_task on tasks; drop function public.test_fail_intake_task()"); }
   assert.equal((await ctx.service.getIntakeSession(ctx.token)).ready_for_quote, true);
+  assert.equal((await ctx.rows("leads")).length, 0);
+  await ctx.service.finalizeIntakeSession(ctx.token);
   assert.equal((await ctx.rows("leads")).length, 1); assert.equal((await ctx.rows("tasks")).length, 1);
 });

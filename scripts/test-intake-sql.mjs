@@ -16,7 +16,7 @@ test("Intake migration: real local SQL, grants, merge, claims, expiry and atomic
     await db.exec(fs.readFileSync("supabase/migrations/20260705000100_baseline_current_public_schema.sql", "utf8"));
     await db.exec(fs.readFileSync("supabase/migrations/20260927000100_whatsapp_handoff_task.sql", "utf8"));
     await db.exec(fs.readFileSync("supabase/migrations/20260927000200_whatsapp_agent_v2_handoff_task.sql", "utf8"));
-    await db.exec(fs.readFileSync("supabase/migrations/20261005200629_intake_v1.sql", "utf8"));
+    await db.exec(fs.readFileSync("supabase/migrations/20261005210820_intake_v1.sql", "utf8"));
     const owner = "00000000-0000-4000-8000-000000000001", other = "00000000-0000-4000-8000-000000000002";
     await db.query("insert into auth.users values($1),($2)", [owner, other]);
     const contact = (await db.query("insert into contacts(owner_id,phone,full_name) values($1,'525512345678','Confirmed') returning id", [owner])).rows[0].id;

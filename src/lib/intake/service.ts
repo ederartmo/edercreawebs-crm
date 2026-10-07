@@ -1,7 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { captureAttribution, evaluateIntakeReadiness, mergeIntakeData, normalizeIntakeData, record, type Attribution, type IntakeData, type IntakeField } from "./domain";
-import { createContinuationCode, createSessionToken, hashToken } from "./tokens";
+import { createContinuationCode, createEventId, createSessionToken, hashToken } from "./tokens";
 
 function context() {
   if (process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "") !== "https://ycdosrsanutbhbgejwwg.supabase.co") throw Error("intake_project_mismatch");
@@ -40,11 +40,50 @@ export async function saveIntakeAnswer(leadId: string, answers: unknown, attribu
   checked(await db.rpc("intake_apply_lead", { p_owner: owner, p_lead: leadId, p_answers: normalizeIntakeData(answers), p_attribution: captureAttribution(attribution) }));
   return getLeadIntake(leadId);
 }
-export async function createIntakeSession(attribution: Attribution) {
+export async function createIntakeSession(attribution: Attribution, webToken?: string) {
   const { db, owner } = context();
   const token = createSessionToken();
   checked(await db.rpc("intake_create_session", { p_owner: owner, p_hash: hashToken(token), p_attribution: captureAttribution({ source: "direct", ...attribution, entry_channel: "web" }) }));
+  if (webToken) await linkWebSessionToIntake(webToken, token);
   return { token, ...evaluateIntakeReadiness({}), linked: false as const, materialized: false as const, status: "incomplete" as const };
+}
+
+/** Tracking is best-effort: a failed link/convert must never fail or roll back intake itself. */
+async function linkWebSessionToIntake(webToken: string, intakeToken: string) {
+  try {
+    const { db, owner } = context();
+    const intake = checked(await db.from("intake_sessions").select("id").eq("owner_id", owner).eq("token_hash", hashToken(intakeToken)).maybeSingle()) as { id: string } | null;
+    if (!intake) return;
+    const linked = await db.from("web_sessions")
+      .update({ intake_session_id: intake.id, updated_at: new Date().toISOString() })
+      .eq("owner_id", owner)
+      .eq("token_hash", hashToken(webToken));
+    if (linked.error) throw Error("intake_storage_failed");
+  } catch { /* web tracking stays optional */ }
+}
+
+/** Idempotent conversion: one lead_created per session is guaranteed by the database. */
+async function markWebSessionConverted(webToken: string, leadId: string) {
+  try {
+    const { db, owner } = context();
+    const hash = hashToken(webToken);
+    const web = checked(await db.from("web_sessions").select("id").eq("owner_id", owner).eq("token_hash", hash).maybeSingle()) as { id: string } | null;
+    if (!web) return;
+    const linked = await db.from("web_sessions")
+      .update({ lead_id: leadId, status: "converted", converted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("owner_id", owner)
+      .eq("token_hash", hash);
+    if (linked.error) return;
+    await db.from("web_events").insert({
+      owner_id: owner,
+      session_id: web.id,
+      event_id: createEventId(),
+      event_name: "lead_created",
+      source: "server",
+      properties: {},
+      occurred_at: new Date().toISOString(),
+    });
+  } catch { /* the lead is already materialized; tracking can be repaired by a retry */ }
 }
 type WebIntakeSessionRow = {
   answers: unknown;
@@ -88,11 +127,17 @@ export async function getIntakeSession(token: string) {
   return stateFromWebSession(session);
 }
 
-export async function finalizeIntakeSession(token: string) {
+export async function finalizeIntakeSession(token: string, webToken?: string) {
   const { db, owner } = context();
+  // Re-links on every finalize: covers sessions created before this feature and missed creates.
+  if (webToken) await linkWebSessionToIntake(webToken, token);
   for (let attempt = 0; attempt < 4; attempt++) {
     const session = await loadWebIntakeSession(db, owner, token);
-    if (session.lead_id) return session.materialized_at ? materializedSessionReceipt() : linkedSessionState();
+    if (session.lead_id) {
+      // Repair path: retries can still record a conversion whose tracking write failed earlier.
+      if (webToken) await markWebSessionConverted(webToken, session.lead_id);
+      return session.materialized_at ? materializedSessionReceipt() : linkedSessionState();
+    }
 
     const readiness = evaluateIntakeReadiness(normalizeIntakeData(session.answers));
     if (!readiness.ready_for_quote) {
@@ -113,6 +158,7 @@ export async function finalizeIntakeSession(token: string) {
       p_summary: JSON.stringify({ ...readiness, first_touch: session.first_touch }),
     })) as string | null;
     if (!leadId) continue;
+    if (webToken) await markWebSessionConverted(webToken, leadId);
 
     const result = await getIntakeSession(token);
     if (result.materialized) return result;

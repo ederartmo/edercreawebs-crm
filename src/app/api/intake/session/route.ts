@@ -6,11 +6,17 @@ import { parseWebIntakeInput } from "@/lib/intake/web";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const COOKIE = "ecw_intake";
+const WEB_COOKIE = "ecw_web_session";
 const headers = { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" };
 async function token() {
   const value = (await cookies()).get(COOKIE)?.value;
   if (!value || !/^[a-f0-9]{64}$/.test(value)) throw Error("session_unavailable");
   return value;
+}
+/** Path=/ web cookie travels here too; only its presence matters, never what the browser claims. */
+async function webSessionToken() {
+  const value = (await cookies()).get(WEB_COOKIE)?.value;
+  return value && /^[a-f0-9]{64}$/.test(value) ? value : undefined;
 }
 export async function GET() {
   if (process.env.INTAKE_WEB_ENABLED !== "true") return NextResponse.json({ error: "disabled" }, { status: 503, headers });
@@ -36,19 +42,20 @@ export async function POST(request: Request) {
       chunks.push(value);
     }
     const input = parseWebIntakeInput(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    const webToken = await webSessionToken();
     if (input.action === "create") {
       const existing = (await cookies()).get(COOKIE)?.value;
       if (existing && /^[a-f0-9]{64}$/.test(existing)) {
         try { return NextResponse.json(await getIntakeSession(existing), { headers }); } catch { /* expired */ }
       }
-      const { token: sessionToken, ...state } = await createIntakeSession(input.attribution);
+      const { token: sessionToken, ...state } = await createIntakeSession(input.attribution, webToken);
       const response = NextResponse.json(state, { status: 201, headers });
       response.cookies.set(COOKIE, sessionToken, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", path: "/api/intake", maxAge: 30 * 86400 });
       return response;
     }
     const sessionToken = await token();
     if (input.action === "continue") return NextResponse.json(await issueContinuation(sessionToken), { headers });
-    if (input.action === "finalize") return NextResponse.json(await finalizeIntakeSession(sessionToken), { headers });
+    if (input.action === "finalize") return NextResponse.json(await finalizeIntakeSession(sessionToken, webToken), { headers });
     if ("mode" in input && input.mode === "edit") return NextResponse.json(await editSessionAnswer(sessionToken, input.field, input.value), { headers });
     return NextResponse.json(await saveSessionAnswer(sessionToken, input.answers), { headers });
   } catch { return NextResponse.json({ error: "invalid_or_unavailable_session" }, { status: 400, headers }); }

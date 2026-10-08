@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     }
     const sessionToken = await token();
     if (input.action === "continue") return NextResponse.json(await issueContinuation(sessionToken), { headers });
-    if (input.action === "finalize") return NextResponse.json(await finalizeIntakeSession(sessionToken, webToken), { headers });
+    if (input.action === "finalize") return NextResponse.json(await finalizeIntakeSession(sessionToken, webToken, input.meta_marketing), { headers });
     if ("mode" in input && input.mode === "edit") return NextResponse.json(await editSessionAnswer(sessionToken, input.field, input.value), { headers });
     return NextResponse.json(await saveSessionAnswer(sessionToken, input.answers), { headers });
   } catch { return NextResponse.json({ error: "invalid_or_unavailable_session" }, { status: 400, headers }); }

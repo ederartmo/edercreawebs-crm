@@ -1,4 +1,5 @@
 import "server-only";
+import { metaLeadEventId, sendMetaLead } from "@/lib/meta/capi";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { captureAttribution, evaluateIntakeReadiness, mergeIntakeData, normalizeIntakeData, record, type Attribution, type IntakeData, type IntakeField } from "./domain";
 import { createContinuationCode, createEventId, createSessionToken, hashToken } from "./tokens";
@@ -86,6 +87,7 @@ async function markWebSessionConverted(webToken: string, leadId: string) {
   } catch { /* the lead is already materialized; tracking can be repaired by a retry */ }
 }
 type WebIntakeSessionRow = {
+  id: string;
   answers: unknown;
   first_touch: Attribution;
   updated_at: string;
@@ -95,7 +97,7 @@ type WebIntakeSessionRow = {
 };
 
 async function loadWebIntakeSession(db: ReturnType<typeof createAdminClient>, owner: string, token: string) {
-  const session = checked(await db.from("intake_sessions").select("answers,first_touch,updated_at,expires_at,lead_id,materialized_at").eq("owner_id", owner).eq("token_hash", hashToken(token)).single()) as WebIntakeSessionRow | null;
+  const session = checked(await db.from("intake_sessions").select("id,answers,first_touch,updated_at,expires_at,lead_id,materialized_at").eq("owner_id", owner).eq("token_hash", hashToken(token)).single()) as WebIntakeSessionRow | null;
   if (!session || Date.parse(session.expires_at) <= Date.now()) throw Error("session_unavailable");
   return session;
 }
@@ -127,7 +129,31 @@ export async function getIntakeSession(token: string) {
   return stateFromWebSession(session);
 }
 
-export async function finalizeIntakeSession(token: string, webToken?: string) {
+/** The current browser grant can only veto CAPI, never replace persisted consent. */
+async function finalizeMetaReceipt(session: WebIntakeSessionRow, webToken?: string, currentMarketing = false) {
+  if (!session.lead_id || !session.materialized_at) return linkedSessionState();
+  const meta_event_id = metaLeadEventId(session.lead_id);
+  try {
+    if (webToken && currentMarketing === true) {
+      const { db, owner } = context();
+      const web = checked(await db.from("web_sessions").select("consent_marketing")
+        .eq("owner_id", owner).eq("token_hash", hashToken(webToken))
+        .eq("intake_session_id", session.id).maybeSingle());
+      if (web?.consent_marketing === true) {
+        const lead = checked(await db.from("leads").select("contact_id,intake").eq("owner_id", owner).eq("id", session.lead_id).single());
+        if (!lead) throw Error("meta_lead_unavailable");
+        const contact = checked(await db.from("contacts").select("email,phone").eq("owner_id", owner).eq("id", lead.contact_id).single());
+        const answers = record(record(lead.intake).answers);
+        await sendMetaLead({ leadId: session.lead_id, materializedAt: session.materialized_at, marketing: true,
+          email: contact?.email || (typeof answers.email === "string" ? answers.email : undefined),
+          phone: contact?.phone || (typeof answers.whatsapp === "string" ? answers.whatsapp : undefined) });
+      }
+    }
+  } catch { /* Optional tracking must never change the materialized receipt. */ }
+  return { ...materializedSessionReceipt(), meta_event_id };
+}
+
+export async function finalizeIntakeSession(token: string, webToken?: string, currentMarketing = false) {
   const { db, owner } = context();
   // Re-links on every finalize: covers sessions created before this feature and missed creates.
   if (webToken) await linkWebSessionToIntake(webToken, token);
@@ -136,7 +162,7 @@ export async function finalizeIntakeSession(token: string, webToken?: string) {
     if (session.lead_id) {
       // Repair path: retries can still record a conversion whose tracking write failed earlier.
       if (webToken) await markWebSessionConverted(webToken, session.lead_id);
-      return session.materialized_at ? materializedSessionReceipt() : linkedSessionState();
+      return session.materialized_at ? finalizeMetaReceipt(session, webToken, currentMarketing) : linkedSessionState();
     }
 
     const readiness = evaluateIntakeReadiness(normalizeIntakeData(session.answers));
@@ -160,8 +186,9 @@ export async function finalizeIntakeSession(token: string, webToken?: string) {
     if (!leadId) continue;
     if (webToken) await markWebSessionConverted(webToken, leadId);
 
-    const result = await getIntakeSession(token);
-    if (result.materialized) return result;
+    const finalizedSession = await loadWebIntakeSession(db, owner, token);
+    const result = stateFromWebSession(finalizedSession);
+    if (result.materialized) return finalizeMetaReceipt(finalizedSession, webToken, currentMarketing);
     if (result.linked) return result;
   }
   throw Error("intake_session_changed_retry");

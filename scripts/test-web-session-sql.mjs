@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { load, copy } from "./test-helpers/proposal-fixture.mjs";
 
 const d = load("src/lib/intake/domain.ts", {});
+const capi = load("src/lib/meta/capi.ts", { "server-only": {}, "node:crypto": crypto });
 const tokens = load("src/lib/intake/tokens.ts", { "node:crypto": crypto });
 const parse = load("src/lib/web/parse.ts", { "@/lib/intake/domain": d });
 const intakeWeb = load("src/lib/intake/web.ts", { "./domain": d });
@@ -87,11 +88,11 @@ const complete = {
   budget_range: "20k_35k", timing: "Octubre", website: "https://example.com/",
 };
 
-async function setup() {
+async function setup(meta = capi) {
   const owner = crypto.randomUUID(), db = sqlClient();
   await pg.query("insert into auth.users values($1)", [owner]);
   const env = { CRM_OWNER_ID: owner, NEXT_PUBLIC_SUPABASE_URL: "https://ycdosrsanutbhbgejwwg.supabase.co", INTAKE_WEB_ENABLED: "true", INTAKE_WEB_ORIGIN: "https://example.com" };
-  const intake = load("src/lib/intake/service.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "./domain": d, "./tokens": tokens }, env);
+  const intake = load("src/lib/intake/service.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "./domain": d, "./tokens": tokens, "@/lib/meta/capi": meta }, env);
   const web = load("src/lib/web/session.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "@/lib/intake/tokens": tokens }, env);
   const jar = new Map(), set = [];
   const json = (data, options = {}) => ({ data, status: options.status ?? 200, headers: options.headers, cookies: { set: (name, value, opts) => { jar.set(name, value); set.push({ name, value, opts }); } } });
@@ -604,4 +605,63 @@ sqlTest("(lifecycle 8) a failing session_started never cascades sessions and is 
   assert.equal((await ctx.rows("web_sessions")).length, 1, "still a single session");
   assert.equal(await startedCount(ctx), 1, "the retried ensureSessionStarted repaired the missing event");
   assert.equal((await ctx.rows("web_sessions"))[0].event_count, 1);
+});
+
+
+sqlTest("Meta: real finalize requires both persisted and current Marketing, no session sends nothing", async () => {
+  for (const scenario of [{ stored: false, current: true }, { stored: null, current: true }, { stored: true, current: false }, { stored: true, current: true, noSession: true }, { stored: true, current: true }]) {
+    const requests = [];
+    const meta = load("src/lib/meta/capi.ts", { "server-only": {}, "node:crypto": crypto }, { META_DATASET_ID: "1641466280624093", META_CAPI_ACCESS_TOKEN: "test-only-token" }, async (_url, request) => { requests.push(JSON.parse(request.body)); return { ok: true }; });
+    const ctx = await setup(meta); await start(ctx);
+    if (scenario.stored !== null) await pg.query("update web_sessions set consent_marketing=$1 where owner_id=$2", [scenario.stored, ctx.owner]);
+    if (scenario.noSession) ctx.jar.delete("ecw_web_session");
+    await ctx.intake.saveSessionAnswer(ctx.jar.get("ecw_intake"), complete);
+    assert.equal(requests.length, 0);
+    const body = { action: "finalize", meta_marketing: scenario.current };
+    const first = await ctx.post(ctx.intakeRoute, body, "/api/intake/session");
+    const second = await ctx.post(ctx.intakeRoute, body, "/api/intake/session");
+    assert.equal(first.status, 200); assert.equal(first.data.materialized, true);
+    assert.equal(first.data.meta_event_id, second.data.meta_event_id);
+    const lead = (await ctx.rows("leads"))[0];
+    assert.equal(first.data.meta_event_id, meta.metaLeadEventId(lead.id));
+    assert.equal((await ctx.rows("leads")).length, 1);
+    assert.equal((await ctx.intake.getIntakeSession(ctx.jar.get("ecw_intake"))).meta_event_id, undefined);
+    assert.ok(!JSON.stringify(first.data).includes(lead.id));
+    assert.ok(!JSON.stringify(first.data).includes("test-only-token"));
+    const allowed = scenario.stored === true && scenario.current === true && !scenario.noSession;
+    assert.equal(requests.length, allowed ? 2 : 0);
+    if (allowed) {
+      assert.equal(requests[0].data[0].event_id, first.data.meta_event_id);
+      assert.deepEqual(requests[0], requests[1]);
+      assert.ok(!JSON.stringify(requests).includes(complete.email));
+      assert.ok(!JSON.stringify(requests).includes(complete.whatsapp));
+    }
+  }
+});
+
+sqlTest("Meta: CAPI 500 and timeout leave real SQL lead/task materialized and retryable", async () => {
+  for (const timeout of [false, true]) {
+    let attempts = 0;
+    const meta = load("src/lib/meta/capi.ts", { "server-only": {}, "node:crypto": crypto }, { META_DATASET_ID: "1641466280624093", META_CAPI_ACCESS_TOKEN: "test-only-token" }, async (_url, request) => {
+      attempts++;
+      if (!timeout) return { ok: false, status: 500 };
+      return new Promise((_, reject) => request.signal.addEventListener("abort", () => reject(Error("timeout"))));
+    });
+    const ctx = await setup(meta); await start(ctx);
+    await pg.query("update web_sessions set consent_marketing=true where owner_id=$1", [ctx.owner]);
+    await ctx.intake.saveSessionAnswer(ctx.jar.get("ecw_intake"), complete);
+    const result = await ctx.post(ctx.intakeRoute, { action: "finalize", meta_marketing: true }, "/api/intake/session");
+    assert.equal(attempts, 1); assert.equal(result.status, 200); assert.equal(result.data.materialized, true);
+    assert.equal((await ctx.rows("leads")).length, 1); assert.equal((await ctx.rows("tasks")).length, 1);
+    assert.equal((await ctx.intake.getIntakeSession(ctx.jar.get("ecw_intake"))).materialized, true);
+  }
+});
+
+sqlTest("Meta: incomplete intake never emits or exposes an event ID", async () => {
+  let calls = 0;
+  const ctx = await setup({ ...capi, sendMetaLead: async () => { calls++; } }); await start(ctx);
+  await pg.query("update web_sessions set consent_marketing=true where owner_id=$1", [ctx.owner]);
+  const result = await ctx.post(ctx.intakeRoute, { action: "finalize", meta_marketing: true }, "/api/intake/session");
+  assert.equal(result.data.materialized, false); assert.equal(result.data.meta_event_id, undefined); assert.equal(calls, 0);
+  for (const body of [{ action: "finalize", meta_marketing: "true" }, { action: "create", meta_marketing: true }]) assert.throws(() => intakeWeb.parseWebIntakeInput(body));
 });

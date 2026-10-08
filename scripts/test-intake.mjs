@@ -5,6 +5,7 @@ import fs from "node:fs";
 import { load, database, copy } from "./test-helpers/proposal-fixture.mjs";
 
 const d = load("src/lib/intake/domain.ts", {});
+const capi = load("src/lib/meta/capi.ts", { "server-only": {}, "node:crypto": crypto });
 const tokens = load("src/lib/intake/tokens.ts", { "node:crypto": crypto });
 const web = load("src/lib/intake/web.ts", { "./domain": d });
 const complete = { name: "Ana", whatsapp: "525512345678", what_sells: "Muebles", customer_acquisition: "Instagram", how_sells: "Agenda visita y cobra anticipo", main_goal: "Filtrar solicitudes", budget_range: "20k_35k", timing: "Próximo mes", no_digital_presence: true };
@@ -101,7 +102,7 @@ function webSessionService() {
     }
     return { data: null, error: Error(`unexpected rpc ${name}`) };
   };
-  const service = load("src/lib/intake/service.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "./domain": d, "./tokens": tokens }, { CRM_OWNER_ID: "owner", NEXT_PUBLIC_SUPABASE_URL: "https://ycdosrsanutbhbgejwwg.supabase.co" });
+  const service = load("src/lib/intake/service.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "./domain": d, "./tokens": tokens, "@/lib/meta/capi": capi }, { CRM_OWNER_ID: "owner", NEXT_PUBLIC_SUPABASE_URL: "https://ycdosrsanutbhbgejwwg.supabase.co" });
   return { db, service };
 }
 
@@ -200,7 +201,7 @@ test("canonical projection reuses CRM fields and real uploads, never generated r
   db.tables.businesses = [{ id: "business", owner_id: "owner", name: "CRM business" }];
   db.tables.leads[0] = { ...db.tables.leads[0], contact_id: "contact", business_id: "business", main_goal: "Filtrar", intake: { answers: { name: "Untrusted duplicate", budget_range: "20k_35k", timing: "Octubre" } } };
   db.tables.assets = [{ owner_id: "owner", lead_id: "lead", category: "image", source: "visual_generator_v1", storage_path: "generated.png", mime_type: "image/png" }];
-  const service = load("src/lib/intake/service.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "./domain": d, "./tokens": tokens }, { CRM_OWNER_ID: "owner", NEXT_PUBLIC_SUPABASE_URL: "https://ycdosrsanutbhbgejwwg.supabase.co" });
+  const service = load("src/lib/intake/service.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "./domain": d, "./tokens": tokens, "@/lib/meta/capi": capi }, { CRM_OWNER_ID: "owner", NEXT_PUBLIC_SUPABASE_URL: "https://ycdosrsanutbhbgejwwg.supabase.co" });
   const first = await service.getLeadIntake("lead");
   assert.equal(first.known_fields.name, "CRM name"); assert.equal(first.known_fields.business_name, "CRM business");
   assert.equal(first.ready_for_quote, false); assert.ok(first.missing_fields.includes("reference"));

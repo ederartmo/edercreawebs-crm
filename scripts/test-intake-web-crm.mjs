@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { load, copy } from "./test-helpers/proposal-fixture.mjs";
 
 const d = load("src/lib/intake/domain.ts", {});
+const capi = load("src/lib/meta/capi.ts", { "server-only": {}, "node:crypto": crypto });
 const tokens = load("src/lib/intake/tokens.ts", { "node:crypto": crypto });
 const enabled = Boolean(process.env.ECW_PGLITE_MODULE);
 let pg;
@@ -86,7 +87,7 @@ async function setup() {
   const owner = crypto.randomUUID(), db = sqlClient();
   await pg.query("insert into auth.users values($1)", [owner]);
   const env = { CRM_OWNER_ID: owner, NEXT_PUBLIC_SUPABASE_URL: "https://ycdosrsanutbhbgejwwg.supabase.co", META_APP_SECRET: "local-test-placeholder", WHATSAPP_PHONE_NUMBER_ID: "phone-id" };
-  const service = load("src/lib/intake/service.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "./domain": d, "./tokens": tokens }, env);
+  const service = load("src/lib/intake/service.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "./domain": d, "./tokens": tokens, "@/lib/meta/capi": capi }, env);
   const { token } = await service.createIntakeSession(firstTouch);
   const rows = table => pg.query(`select * from ${table} where owner_id=$1`, [owner]).then(r => r.rows);
   const saveComplete = (answers = complete) => service.saveSessionAnswer(token, answers);

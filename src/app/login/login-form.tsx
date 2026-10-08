@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
@@ -67,6 +68,15 @@ export function LoginForm() {
           placeholder="••••••••"
         />
       </label>
+
+      <div className="-mt-2 text-right">
+        <Link
+          href="/forgot-password"
+          className="text-sm font-medium text-blue-600 hover:text-blue-700"
+        >
+          ¿Olvidaste tu contraseña?
+        </Link>
+      </div>
 
       {errorMessage ? (
         <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">

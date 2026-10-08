@@ -1,0 +1,8 @@
+# Project-scoped MCP configuration. Requires a trusted Codex workspace.
+# OAuth credentials are managed by the client outside this repository.
+[mcp_servers.supabase-miriam]
+enabled = false
+
+[mcp_servers.supabase-edercreawebs]
+url = "https://mcp.supabase.com/mcp?project_ref=ycdosrsanutbhbgejwwg&read_only=true"
+enabled = true

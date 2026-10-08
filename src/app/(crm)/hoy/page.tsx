@@ -18,8 +18,8 @@ type LeadRow = {
   next_followup_at: string | null;
   created_at: string;
   contacts:
-    | { full_name: string | null; phone: string }
-    | { full_name: string | null; phone: string }[]
+    | { full_name: string | null; phone: string | null }
+    | { full_name: string | null; phone: string | null }[]
     | null;
   businesses:
     | { name: string | null }

@@ -93,7 +93,7 @@ async function setup(meta = capi) {
   await pg.query("insert into auth.users values($1)", [owner]);
   const env = { CRM_OWNER_ID: owner, NEXT_PUBLIC_SUPABASE_URL: "https://ycdosrsanutbhbgejwwg.supabase.co", INTAKE_WEB_ENABLED: "true", INTAKE_WEB_ORIGIN: "https://example.com" };
   const intake = load("src/lib/intake/service.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "./domain": d, "./tokens": tokens, "@/lib/meta/capi": meta }, env);
-  const web = load("src/lib/web/session.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "@/lib/intake/tokens": tokens }, env);
+  const web = load("src/lib/web/session.ts", { "server-only": {}, "@/lib/supabase/admin": { createAdminClient: () => db }, "@/lib/intake/tokens": tokens, "@/lib/meta/capi": meta }, env);
   const jar = new Map(), set = [];
   const json = (data, options = {}) => ({ data, status: options.status ?? 200, headers: options.headers, cookies: { set: (name, value, opts) => { jar.set(name, value); set.push({ name, value, opts }); } } });
   const headers = { cookies: async () => ({ get: name => (jar.has(name) ? { value: jar.get(name) } : undefined) }) };

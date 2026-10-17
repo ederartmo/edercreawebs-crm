@@ -260,7 +260,10 @@ function memoryDb() {
                 return { data: null, error: { code: "23505" } };
               }
               const row = { ...payload };
-              if (table === "web_sessions") row.reference_code ??= `ECW-${crypto.randomBytes(5).toString("hex").toUpperCase()}`;
+              if (table === "web_sessions") {
+                row.id ??= crypto.randomUUID();
+                row.reference_code ??= `ECW-${crypto.randomBytes(5).toString("hex").toUpperCase()}`;
+              }
               tables[table].push(row);
               return { data: row, error: null };
             }
@@ -280,10 +283,11 @@ function memoryDb() {
   const startedAttempts = () => attempts.filter((entry) => entry.table === "web_events" && entry.payload.event_name === "session_started");
   return { from, tables, startedAttempts };
 }
-const webService = (db) => load("src/lib/web/session.ts", {
+const webService = (db, meta = { sendMetaContact: async () => false }) => load("src/lib/web/session.ts", {
   "server-only": {},
   "@/lib/supabase/admin": { createAdminClient: () => db },
   "@/lib/intake/tokens": tokens,
+  "@/lib/meta/capi": meta,
 }, { CRM_OWNER_ID: "owner-uuid", NEXT_PUBLIC_SUPABASE_URL: "https://ycdosrsanutbhbgejwwg.supabase.co" });
 const startedRows = (db) => db.tables.web_events.filter((entry) => entry.event_name === "session_started");
 
@@ -328,4 +332,127 @@ test("un session_started perdido se repara en la siguiente reutilización sin du
   assert.equal(again.created, false);
   assert.equal(db.startedAttempts().length, 2, "solo reintenta cuando realmente falta");
   assert.equal(startedRows(db).length, 1, "nunca queda duplicado");
+});
+
+
+test("whatsapp_contact carries current Marketing and the same UUID into Meta", async () => {
+  const calls = [];
+  const meta = {
+    sendMetaContact: async input => {
+      calls.push(copy(input));
+      return true;
+    },
+  };
+
+  const db = memoryDb();
+  const service = webService(db, meta);
+  const created = await service.createWebSession({
+    action: "create",
+    consent: { analytics: true, marketing: true },
+  });
+
+  const eventId = uuid();
+  const result = await service.recordWebEvent(created.token, {
+    action: "event",
+    event_name: "whatsapp_contact",
+    event_id: eventId,
+    properties: {},
+    meta_marketing: true,
+  });
+
+  assert.deepEqual(copy(result), { ok: true });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].eventId, eventId);
+  assert.equal(calls[0].marketing, true);
+  assert.equal(calls[0].externalId, db.tables.web_sessions[0].id);
+  assert.equal(db.tables.web_events.filter(e => e.event_name === "whatsapp_contact").length, 1);
+});
+
+test("whatsapp_contact requires persisted plus current Marketing for CAPI eligibility", async () => {
+  for (const scenario of [
+    { stored: false, current: true, expected: false },
+    { stored: true, current: false, expected: false },
+    { stored: true, current: true, expected: true },
+  ]) {
+    const calls = [];
+    const db = memoryDb();
+    const service = webService(db, {
+      sendMetaContact: async input => {
+        calls.push(copy(input));
+        return true;
+      },
+    });
+
+    const created = await service.createWebSession({
+      action: "create",
+      consent: { analytics: true, marketing: scenario.stored },
+    });
+
+    await service.recordWebEvent(created.token, {
+      action: "event",
+      event_name: "whatsapp_contact",
+      event_id: uuid(),
+      properties: {},
+      meta_marketing: scenario.current,
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].marketing, scenario.expected);
+  }
+});
+
+test("Meta failure never breaks whatsapp_contact web tracking", async () => {
+  const db = memoryDb();
+  const service = webService(db, {
+    sendMetaContact: async () => {
+      throw Error("provider unavailable");
+    },
+  });
+
+  const created = await service.createWebSession({
+    action: "create",
+    consent: { analytics: true, marketing: true },
+  });
+
+  const result = await service.recordWebEvent(created.token, {
+    action: "event",
+    event_name: "whatsapp_contact",
+    event_id: uuid(),
+    properties: {},
+    meta_marketing: true,
+  });
+
+  assert.deepEqual(copy(result), { ok: true });
+  assert.equal(db.tables.web_events.filter(e => e.event_name === "whatsapp_contact").length, 1);
+});
+
+test("whatsapp_contact parser accepts boolean meta_marketing only on that event", () => {
+  const id = uuid();
+
+  const parsed = parse.parseWebSessionInput({
+    action: "event",
+    event_name: "whatsapp_contact",
+    event_id: id,
+    properties: {},
+    meta_marketing: true,
+  });
+
+  assert.equal(parsed.meta_marketing, true);
+  assert.equal(parsed.event_id, id.toLowerCase());
+
+  assert.throws(() => parse.parseWebSessionInput({
+    action: "event",
+    event_name: "whatsapp_contact",
+    event_id: uuid(),
+    properties: {},
+    meta_marketing: "true",
+  }), /invalid_meta_marketing/);
+
+  assert.throws(() => parse.parseWebSessionInput({
+    action: "event",
+    event_name: "stage_viewed",
+    event_id: uuid(),
+    properties: {},
+    meta_marketing: true,
+  }), /invalid_meta_marketing/);
 });

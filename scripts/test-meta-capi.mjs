@@ -50,3 +50,52 @@ test("invalid matching data never fabricates phone/country code and invalid time
   assert.equal(await ctx.capi.sendMetaLead({ ...base, materializedAt: "bad" }), false);
   assert.equal(ctx.calls.length, 1);
 });
+
+
+test("Contact uses the browser UUID for Pixel+CAPI deduplication", async () => {
+  const ctx = setup();
+  const eventId = "123e4567-e89b-42d3-a456-426614174000";
+
+  assert.equal(await ctx.capi.sendMetaContact({
+    eventId,
+    occurredAt: "2026-10-17T07:00:00Z",
+    marketing: true,
+    externalId: "web-session-123",
+    fbp: "fb.1.1234567890.1234567890",
+    fbc: "fb.1.1234567890.AbCdEf",
+  }), true);
+
+  const event = ctx.calls[0].body.data[0];
+
+  assert.equal(event.event_name, "Contact");
+  assert.equal(event.event_id, `contact_${eventId}`);
+  assert.equal(event.event_time, Date.parse("2026-10-17T07:00:00Z") / 1000);
+  assert.equal(event.action_source, "website");
+  assert.equal(event.event_source_url, "https://edercreawebs.com");
+
+  assert.deepEqual(event.user_data, {
+    external_id: [hash("web-session-123")],
+    fbp: "fb.1.1234567890.1234567890",
+    fbc: "fb.1.1234567890.AbCdEf",
+  });
+});
+
+test("Contact requires Marketing and a valid UUID", async () => {
+  const ctx = setup();
+
+  assert.equal(await ctx.capi.sendMetaContact({
+    eventId: "123e4567-e89b-42d3-a456-426614174000",
+    occurredAt: "2026-10-17T07:00:00Z",
+    marketing: false,
+    externalId: "session",
+  }), false);
+
+  assert.equal(await ctx.capi.sendMetaContact({
+    eventId: "bad-id",
+    occurredAt: "2026-10-17T07:00:00Z",
+    marketing: true,
+    externalId: "session",
+  }), false);
+
+  assert.equal(ctx.calls.length, 0);
+});

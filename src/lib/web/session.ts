@@ -2,12 +2,13 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createEventId, createSessionToken, hashToken } from "@/lib/intake/tokens";
 import type { WebSessionInput } from "@/lib/web/parse";
+import { sendMetaContact } from "@/lib/meta/capi";
 
 type CreateInput = Extract<WebSessionInput, { action: "create" }>;
 type EventInput = Extract<WebSessionInput, { action: "event" }>;
 type HeartbeatInput = Extract<WebSessionInput, { action: "heartbeat" }>;
-type SessionRow = { id: string; reference_code: string; status: string; last_seen_at: string; ended_at: string | null };
-const SESSION_COLUMNS = "id,reference_code,status,last_seen_at,ended_at";
+type SessionRow = { id: string; reference_code: string; status: string; last_seen_at: string; ended_at: string | null; consent_marketing: boolean; fbp: string | null; fbc: string | null };
+const SESSION_COLUMNS = "id,reference_code,status,last_seen_at,ended_at,consent_marketing,fbp,fbc";
 /** One row = one visit: a session is only reused while it is not ended and has been seen in the last 30 minutes. */
 const REUSE_WINDOW_MS = 30 * 60_000;
 /** Server-side only: the browser never picks the owner, the session id or the token hash. */
@@ -149,6 +150,7 @@ export async function recordWebEvent(token: string, input: EventInput) {
   const { db, owner } = context();
   const session = await loadSession(db, owner, hashToken(token));
   if (!session) throw Error("web_session_unavailable");
+  const occurredAt = new Date().toISOString();
   const result = await db.from("web_events").insert({
     owner_id: owner,
     session_id: session.id,
@@ -158,10 +160,27 @@ export async function recordWebEvent(token: string, input: EventInput) {
     path: input.path,
     properties: input.properties,
     source: "client",
-    occurred_at: new Date().toISOString(),
+    occurred_at: occurredAt,
   });
   // 23505 means a retried event_id is already recorded: idempotent success, not failure.
   if (result.error && (result.error as { code?: string }).code !== "23505") throw Error("web_session_storage_failed");
+
+  // Meta is optional and best-effort. Both persisted + current Marketing consent are required.
+  if (input.event_name === "whatsapp_contact") {
+    try {
+      await sendMetaContact({
+        eventId: input.event_id,
+        occurredAt,
+        marketing: session.consent_marketing === true && input.meta_marketing === true,
+        externalId: session.id,
+        fbp: session.fbp,
+        fbc: session.fbc,
+      });
+    } catch {
+      /* Meta must never break web tracking or WhatsApp navigation. */
+    }
+  }
+
   return { ok: true as const };
 }
 

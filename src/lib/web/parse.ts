@@ -1,12 +1,12 @@
 import { captureAttribution, record, type Attribution } from "@/lib/intake/domain";
 
 /** Events a browser may declare. Everything else (session_started, lead_created) is server-owned. */
-export const CLIENT_EVENTS = ["audit_cta_clicked", "diagnosis_started", "stage_viewed", "contact_details_submitted", "session_ended"] as const;
+export const CLIENT_EVENTS = ["audit_cta_clicked", "diagnosis_started", "stage_viewed", "contact_details_submitted", "whatsapp_contact", "session_ended"] as const;
 export type ClientEvent = typeof CLIENT_EVENTS[number];
 export type Consent = { analytics: boolean; marketing: boolean };
 export type WebSessionInput =
   | { action: "create"; attribution: Attribution; fbp?: string; fbc?: string; consent?: Consent; current_path?: string; current_stage?: string }
-  | { action: "event"; event_name: ClientEvent; event_id: string; stage?: string; path?: string; properties: Record<string, boolean | string> }
+  | { action: "event"; event_name: ClientEvent; event_id: string; stage?: string; path?: string; properties: Record<string, boolean | string>; meta_marketing?: boolean }
   | { action: "heartbeat"; current_path?: string; current_stage?: string; consent?: Consent };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -15,7 +15,7 @@ const PIXEL_ID_PATTERN = /^[A-Za-z0-9._!:-]{1,300}$/;
 const ATTRIBUTION_FIELDS = ["source", "entry_channel", "landing_path", "referrer", "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"] as const;
 const ALLOWED_KEYS: Record<string, string[]> = {
   create: ["action", "attribution", "consent", "current_path", "current_stage"],
-  event: ["action", "event_name", "event_id", "stage", "path", "properties"],
+  event: ["action", "event_name", "event_id", "stage", "path", "properties", "meta_marketing"],
   heartbeat: ["action", "current_path", "current_stage", "consent"],
 };
 /** Per-event property schema. A key outside this map is never persisted, so PII cannot enter. */
@@ -24,6 +24,7 @@ const EVENT_PROPERTIES: Record<ClientEvent, Record<string, "boolean" | "string">
   diagnosis_started: {},
   stage_viewed: { previous_stage: "string" },
   contact_details_submitted: { has_name: "boolean", has_whatsapp: "boolean", has_email: "boolean" },
+  whatsapp_contact: {},
   session_ended: {},
 };
 
@@ -111,6 +112,9 @@ export function parseWebSessionInput(value: unknown): WebSessionInput {
     if (!(CLIENT_EVENTS as readonly string[]).includes(name)) throw Error("invalid_event_name");
     const eventId = input.event_id;
     if (typeof eventId !== "string" || !UUID_PATTERN.test(eventId)) throw Error("invalid_event_id");
+    if (input.meta_marketing !== undefined) {
+      if (name !== "whatsapp_contact" || typeof input.meta_marketing !== "boolean") throw Error("invalid_meta_marketing");
+    }
     return {
       action,
       event_name: name as ClientEvent,
@@ -118,6 +122,7 @@ export function parseWebSessionInput(value: unknown): WebSessionInput {
       stage: text(input.stage, 64),
       path: path(input.path),
       properties: properties(name as ClientEvent, input.properties),
+      ...(name === "whatsapp_contact" ? { meta_marketing: input.meta_marketing === true } : {}),
     };
   }
 

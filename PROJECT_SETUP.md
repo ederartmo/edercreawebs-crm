@@ -54,6 +54,23 @@ Descubre `codex.exe` en las instalaciones hijas de `$HOME\AppData\Local\OpenAI\C
 
 ## Entorno y secretos
 
+### Registro de correos de Recursos
+
+`POST /api/resources/subscribe` guarda en `public.resource_subscribers` mediante
+el cliente administrativo existente de Supabase. No crea leads. El envío de
+confirmaciones es opcional y está apagado por defecto.
+Está deshabilitado salvo que `RESOURCES_WEB_ENABLED=true`; exige
+`RESOURCES_WEB_ORIGIN` con el origen exacto de la web. En local se probó con
+`http://127.0.0.1:5174`. El entorno privado se carga con el launcher habitual;
+no se copian claves al frontend. Ver `handoff/RECURSOS.md`.
+
+La confirmación preparada usa Resend: `RESEND_API_KEY`, `RESEND_FROM`,
+`RESOURCES_EMAIL_SIGNING_SECRET` (aleatorio, al menos 32 caracteres),
+`RESOURCES_CONFIRMATION_ORIGIN` y `RESOURCES_CONFIRMATION_ENABLED`. Mantener el
+último en `false` hasta publicar las rutas y configurar el entorno privado.
+El dominio ya está verificado y Eder guardó la clave en el CRM de Hostinger.
+Configuración y recorrido: `handoff/RESEND.md`.
+
 Archivo propio: `$HOME\.secrets\edercreawebs-crm.env`, fuera de Git. `.env.example` contiene solo nombres, asignaciones vacías y comentarios seguros.
 
 Variables:

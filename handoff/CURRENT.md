@@ -1,5 +1,53 @@
 # Estado actual
 
+## Resend: dominio verificado y confirmación de Recursos preparada
+
+`edercreawebs.com` quedó verificado en Resend tras agregar TXT DKIM y dos CNAME
+desde Hostinger. La comparación confirmó intactos los DNS previos. Se preparó
+el correo HTML/texto y el flujo de confirmación con enlace firmado de 24 horas,
+página con confirmación explícita e idempotencia de envío. La migración de
+confirmación se aplicó únicamente sobre Recursos; no confirma registros anteriores.
+
+El envío permanece apagado por defecto en local. Eder confirmó que `RESEND_API_KEY`
+está guardada en las variables del CRM en Hostinger; no se copió su valor al
+entorno local. Se generó un secreto de firma de 256 bits y se copió únicamente al
+portapapeles para que Eder lo guarde allí, sin exponerlo en logs/chat/Git. Eder
+reportó un redeploy en curso; todavía falta verificar las variables y las rutas
+públicas. No se enviaron correos reales. Ver `handoff/RESEND.md`.
+
+Se refinó la plantilla del correo con el estilo blanco/negro de la web, preheader,
+botón de ancho completo, firma y aviso de vencimiento. La vista previa HTML/texto
+está en outputs del frontend; se verificó en 360/390 px y escritorio. Eder aprobó
+el diseño y autorizó guardar y hacer push de los cambios. Queda verificar la
+configuración productiva y la ruta pública después de integrar/publicar.
+
+Comprobación de cierre sobre el código actualizado de main: 60 pruebas de
+Recursos, Intake, CAPI y web session correctas; build y TypeScript correctos;
+lint dirigido y diff sin errores. Lint global conserva un error preexistente de
+`react-hooks/set-state-in-effect` en `src/app/reset-password/page.tsx`, intacto
+respecto a main. No se amplió el bloque para cambiar la recuperación de acceso.
+
+## Registro de correos de Recursos — integrado localmente
+
+Se añadió `POST /api/resources/subscribe` y el módulo `src/lib/resources/subscription.ts`
+para el formulario de Recursos de EderCreaWebs. Usa el cliente administrativo
+existente y únicamente `public.resource_subscribers` en el Supabase autorizado.
+No crea contactos/leads, no usa Intake ni envía correos o WhatsApp.
+
+`RESOURCES_WEB_ENABLED=true` habilita la ruta; `RESOURCES_WEB_ORIGIN` exige el
+origen exacto del frontend. Ambos aparecen en `.env.example`. En local se probó
+con origen `http://127.0.0.1:5174` y CRM en puerto 3001, cargando el entorno externo
+mediante el launcher/doctor, sin modificar secretos ni `.env.local`.
+
+Se verificaron registros reales desde tres tamaños de navegador, duplicados,
+fecha de alta, consentimiento y preservación de una baja. Se eliminaron solo los
+tres correos sintéticos de prueba. Build, TypeScript y lint dirigido correctos;
+27 tests de Recursos e Intake correctos. Sin deploy, commit ni push.
+
+Pendiente para la web publicada: desplegar los cambios del CRM y del frontend,
+activar las dos variables en el CRM y configurar el origen del backend en la web.
+La tabla remota ya existe; no reaplicar su migración. Detalle: `handoff/RECURSOS.md`.
+
 ## Infraestructura remota Intake V1 aplicada y validada — 2026-10-05
 
 Este checkpoint sustituye las referencias históricas de abajo a «migración solo local». Repo/remoto y rama `feat/whatsapp-cloud-mvp` verificados; HEAD `d9d0a8ffe419e2c35abd29ba6327d18631c14c5e`. Entorno propio cargado desde `$HOME/.secrets/edercreawebs-crm.env`; doctor sin FAIL. Catálogo efectivo con `supabase-edercreawebs`, sin Miriam; configuración local read-only intacta.
